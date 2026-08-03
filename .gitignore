@@ -1,0 +1,185 @@
+# ==============================================================================
+# .gitignore
+# ==============================================================================
+# The single most important file in this repository from a security standpoint.
+# Everything below is either a secret, a machine-specific artefact, or a build
+# output — none of which belong in version control.
+#
+# Reminder: adding a path here does NOT remove it from history. If a secret has
+# already been committed, it must be treated as COMPROMISED and rotated, then
+# purged with git-filter-repo or BFG. GitHub's secret scanning will find it
+# within minutes of a push to a public repo, and so will everyone else.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Secrets and credentials — NEVER COMMIT
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+
+# SSH and TLS material
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+!**/ca-certificates.crt
+id_rsa*
+*.ppk
+
+# AWS
+.aws/
+credentials
+aws-credentials*
+
+# Ansible Vault password file. Losing this makes the vault unrecoverable, and
+# committing it makes the vault pointless.
+.vault_pass
+!.vault_pass.example
+vault_pass.txt
+
+# The decrypted vault. group_vars/all/vault.yml SHOULD be committed once
+# encrypted (that is the whole point of Vault), but any plaintext copy must not.
+**/vault.yml.plain
+**/vault-decrypted.yml
+
+# Kubernetes Secrets rendered with real values
+*-secret-real.yaml
+sealed-secrets-key*
+
+# ------------------------------------------------------------------------------
+# Terraform
+# ------------------------------------------------------------------------------
+# State contains every value Terraform touched in PLAINTEXT — passwords, keys,
+# certificates. It belongs in the encrypted S3 backend, never in Git.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Downloaded providers and modules — hundreds of MB, and re-created by
+# `terraform init`.
+.terraform/
+.terraform.tfstate.lock.info
+
+# Variable values often contain a home IP address or an account ID.
+# terraform.tfvars.example IS committed as the template.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Backend configuration holds a bucket name specific to one AWS account.
+backend.hcl
+!backend.hcl.example
+
+# The local-backend override used only for offline plan validation. The
+# `.disabled` template IS committed; the active file must never be.
+zz_local_backend_override.tf
+
+# Saved plan files can contain sensitive values.
+*.tfplan
+plan.out
+crash.log
+crash.*.log
+
+# .terraform.lock.hcl IS committed on purpose — it pins provider checksums and
+# is what makes `terraform init` reproducible across machines.
+!.terraform.lock.hcl
+
+# ------------------------------------------------------------------------------
+# Ansible
+# ------------------------------------------------------------------------------
+*.retry
+ansible.log
+.ansible_facts/
+.ansible_inventory_cache/
+.ansible/
+
+# ------------------------------------------------------------------------------
+# Node.js
+# ------------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
+# ------------------------------------------------------------------------------
+# Python
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ------------------------------------------------------------------------------
+# Java / Maven
+# ------------------------------------------------------------------------------
+target/
+*.class
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+*.war
+*.ear
+.mvn/timing.properties
+.gradle/
+
+# ------------------------------------------------------------------------------
+# Security scan reports
+# ------------------------------------------------------------------------------
+# Regenerated on every build, and can disclose exactly which CVEs are present in
+# a running image — useful reconnaissance for an attacker.
+trivy-*.json
+trivy-*.txt
+*-trivy-report.*
+.scannerwork/
+.sonar/
+
+# ------------------------------------------------------------------------------
+# Kubernetes / Helm
+# ------------------------------------------------------------------------------
+kubeconfig
+kubeconfig-*
+*.kubeconfig
+charts/*.tgz
+.helm/
+
+# Rendered output — always reproducible with `kubectl kustomize`.
+rendered.yaml
+manifests-rendered/
+
+# ------------------------------------------------------------------------------
+# Editors and operating systems
+# ------------------------------------------------------------------------------
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ------------------------------------------------------------------------------
+# Misc
+# ------------------------------------------------------------------------------
+*.log
+tmp/
+temp/
+.cache/
