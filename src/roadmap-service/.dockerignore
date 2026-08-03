@@ -1,0 +1,29 @@
+# See frontend/.dockerignore for the rationale.
+#
+# Excluding target/ matters here: if a developer runs `mvn package` locally, a
+# stale JAR would be copied into the build context and could shadow the one the
+# multi-stage build produces, making the image contents non-reproducible.
+
+target/
+!target/*.jar
+.mvn/
+mvnw
+mvnw.cmd
+
+.env
+.env.*
+*.pem
+*.key
+
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+README.md
+*.md
+
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
