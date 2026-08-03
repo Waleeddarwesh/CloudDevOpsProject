@@ -1,0 +1,89 @@
+# ==============================================================================
+# yamllint configuration
+# ==============================================================================
+# The stock `default` preset is far too strict for Kubernetes and Ansible: it
+# rejects lines over 80 characters (impossible with container image references),
+# demands quoted booleans, and objects to the `on:` key in GitHub Actions
+# workflows.
+#
+# The rules below relax exactly those points while keeping the checks that
+# genuinely catch bugs — duplicate keys, tab indentation, and trailing spaces.
+# ==============================================================================
+
+extends: default
+
+ignore: |
+  .terraform/
+  node_modules/
+  .venv/
+  venv/
+  **/target/
+  # Templates contain Jinja expressions that are not valid YAML until rendered.
+  03-Ansible/roles/*/templates/
+  # An encrypted vault is a base64 blob, not YAML.
+  03-Ansible/group_vars/all/vault.yml
+
+rules:
+  # ----------------------------------------------------------------------------
+  # Disabled
+  # ----------------------------------------------------------------------------
+  line-length: disable
+  # A fully-qualified ECR image reference plus indentation routinely exceeds any
+  # sane limit, and wrapping it would break the manifest.
+
+  comments-indentation: disable
+  # The heavily-commented style used throughout this repository deliberately
+  # places explanatory block comments at column 0 above an indented key.
+
+  # ----------------------------------------------------------------------------
+  # Relaxed
+  # ----------------------------------------------------------------------------
+  truthy:
+    # Without this, yamllint flags the `on:` key in every GitHub Actions
+    # workflow, because YAML 1.1 treats `on` as a boolean.
+    allowed-values: ["true", "false"]
+    check-keys: false
+
+  braces:
+    # Permits the compact inline form used for configMapKeyRef:
+    #   valueFrom: { configMapKeyRef: { name: x, key: y } }
+    max-spaces-inside: 1
+
+  brackets:
+    max-spaces-inside: 1
+
+  comments:
+    min-spaces-from-content: 1
+
+  indentation:
+    spaces: 2
+    # Sequences may be indented under their key or aligned with it; both are
+    # common in Kubernetes manifests and neither is wrong.
+    indent-sequences: consistent
+
+  document-start:
+    # `---` is conventional in Ansible but noise in a single-document
+    # Kubernetes file.
+    present: false
+
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+
+  # ----------------------------------------------------------------------------
+  # Enforced — these catch real bugs
+  # ----------------------------------------------------------------------------
+  key-duplicates: enable
+  # A duplicate key silently overwrites the first. In a Deployment this can mean
+  # the resource limits you wrote are ignored entirely.
+
+  trailing-spaces: enable
+
+  new-line-at-end-of-file: enable
+
+  octal-values:
+    # `mode: 0644` is parsed as the DECIMAL number 644 by some parsers, giving
+    # completely wrong file permissions. Quoting it — mode: "0644" — is correct.
+    forbid-implicit-octal: true
+    forbid-explicit-octal: false
