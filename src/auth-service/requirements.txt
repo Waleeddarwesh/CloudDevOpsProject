@@ -1,0 +1,14 @@
+# Application dependencies (pinned to exact versions for reproducible builds).
+#
+# Pinning with `==` rather than `>=` means the image built by Jenkins today and
+# the image rebuilt six months from now contain byte-identical dependencies —
+# without it, a transitive upgrade can change behaviour between the build that
+# passed the Trivy gate and the build that reaches production.
+Flask==3.0.2
+mysql-connector-python==9.4.0
+bcrypt==4.3.0
+
+# Production WSGI server. Flask's built-in server (app.run) is single-threaded
+# and explicitly documented as unsuitable for production; gunicorn serves the
+# same WSGI callable with a pre-fork worker model. See the Dockerfile CMD.
+gunicorn==23.0.0
