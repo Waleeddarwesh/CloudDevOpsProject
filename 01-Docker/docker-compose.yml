@@ -1,0 +1,297 @@
+# ==============================================================================
+# iVolve DevOps Roadmap — Local Development Stack
+# ==============================================================================
+# Brings up the complete four-tier application on a single machine so the whole
+# system can be built and tested before any AWS resource is provisioned.
+#
+#   Browser :3000 ──► frontend ──┬──► auth-service :5000 ──► mysql :3306
+#                                └──► roadmap-service :8080
+#
+# Run with:   docker compose up --build -d
+#
+# NOTE: there is no `version:` key. It was deprecated in Compose v2 and now emits
+# `WARN[0000] the attribute 'version' is obsolete`. The Compose Specification
+# derives the schema from the file contents instead.
+# ==============================================================================
+
+# Project name. Without this, Compose derives it from the directory name
+# ("01-docker"), which would produce containers called `01-docker-frontend-1`.
+name: ivolve
+
+# ------------------------------------------------------------------------------
+# Reusable YAML anchors
+# ------------------------------------------------------------------------------
+# `x-` prefixed keys are extension fields: Compose ignores them, but YAML anchors
+# defined here can be merged into services below with `<<:`. This keeps the
+# logging and restart policy identical across every service without repetition.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    # Without these caps a container that logs in a hot loop will fill the host
+    # disk. 10 MB × 3 files = 30 MB ceiling per container.
+    max-size: "5m"
+    max-file: "3"
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging: *default-logging
+  security_opt:
+    # Prevents a process inside the container from gaining new privileges via
+    # setuid binaries — blocks the most common container privilege-escalation path.
+    - no-new-privileges:true
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # MySQL 8.0 — user account storage
+  # ----------------------------------------------------------------------------
+  # Only auth-service talks to this database. The frontend and roadmap-service
+  # never receive credentials, which is why they are on the same network but have
+  # no DB environment variables.
+  # ----------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: ivolve-mysql
+    <<: *service-defaults
+
+    environment:
+      # Values come from the .env file in this directory (copy .env.example).
+      # Compose substitutes ${VAR} at parse time; `:?` makes the variable
+      # mandatory, so `docker compose up` fails loudly with a clear message
+      # instead of silently starting MySQL with an empty root password.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required — copy .env.example to .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ivolve}
+      MYSQL_USER: ${MYSQL_USER:-ivolve_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required — copy .env.example to .env}
+
+    # Named volume, not a bind mount. Docker manages the storage driver, so the
+    # database survives `docker compose down` and works identically on
+    # Linux/macOS/Windows without host-path permission problems.
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+    networks:
+      - ivolve-net
+
+    # Published to the host so a local MySQL client / DBeaver can inspect the
+    # schema during development. Bound to 127.0.0.1 rather than 0.0.0.0 so the
+    # database is NOT reachable from other machines on the LAN.
+    ports:
+      - "127.0.0.1:3306:3306"
+
+    # The other services must not start until MySQL is genuinely accepting
+    # queries. A plain `depends_on` only waits for the container to be *created*,
+    # which is why auth-service used to crash-loop on first boot.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      # MySQL's first boot initialises the data directory, which takes far longer
+      # than a normal start. start_period suppresses failures during that window.
+      start_period: 40s
+      retries: 10
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ----------------------------------------------------------------------------
+  # Auth Service — Python 3.12 / Flask (port 5000)
+  # ----------------------------------------------------------------------------
+  # Owns user signup and login. Creates the `users` table on first connection
+  # (see ensure_database_ready() in app.py), so no init SQL script is needed.
+  # ----------------------------------------------------------------------------
+  auth-service:
+    build:
+      context: ../src/auth-service
+      dockerfile: Dockerfile
+      # Build the hardened runtime stage explicitly rather than relying on the
+      # last stage in the file — this stays correct if stages are reordered.
+      target: runtime
+    image: ivolve-auth-service:local
+    container_name: ivolve-auth-service
+    <<: *service-defaults
+
+    environment:
+      # These names match app.py exactly. Note DB_USER — not DB_USERNAME.
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${MYSQL_DATABASE:-ivolve}
+      DB_USER: ${MYSQL_USER:-ivolve_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required — copy .env.example to .env}
+
+    networks:
+      - ivolve-net
+
+    # Exposed on the host only for direct API testing with curl/Postman.
+    # In Kubernetes this service is ClusterIP-only and never leaves the cluster.
+    ports:
+      - "127.0.0.1:5000:5000"
+
+    depends_on:
+      mysql:
+        # service_healthy — waits for the healthcheck above to pass, not merely
+        # for the container to exist.
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:5000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+    cap_drop:
+      # The service binds a high port (5000) as a non-root user and needs no
+      # Linux capabilities at all, so drop the entire default set.
+      - ALL
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ----------------------------------------------------------------------------
+  # Roadmap Service — Java 21 / Spring Boot 3.5.4 (port 8080)
+  # ----------------------------------------------------------------------------
+  # Completely stateless: serves a static roadmap payload from GET /api/roadmap.
+  # It has no database dependency, so it can start in parallel with MySQL.
+  # ----------------------------------------------------------------------------
+  roadmap-service:
+    build:
+      context: ../src/roadmap-service
+      dockerfile: Dockerfile
+      target: runtime
+    image: ivolve-roadmap-service:local
+    container_name: ivolve-roadmap-service
+    <<: *service-defaults
+
+    environment:
+      # Heap is capped relative to the 512M container limit below. See the
+      # Dockerfile for why MaxRAMPercentage matters inside a container.
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75.0 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
+
+    networks:
+      - ivolve-net
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    healthcheck:
+      # This service exposes no /health endpoint — /api/roadmap is the only
+      # route, so it doubles as the liveness signal.
+      test:
+        ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/api/roadmap"]
+      interval: 15s
+      timeout: 5s
+      # The JVM plus Spring context startup is slow; 45s avoids false negatives.
+      start_period: 45s
+      retries: 5
+
+    cap_drop:
+      - ALL
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ----------------------------------------------------------------------------
+  # Frontend — Node.js 22 / Express 5 / EJS (port 3000)
+  # ----------------------------------------------------------------------------
+  # The only service published to the outside world. Renders the login/signup
+  # page and the roadmap page, calling the two backend APIs server-side.
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ../src/frontend
+      dockerfile: Dockerfile
+      target: runtime
+    image: ivolve-frontend:local
+    container_name: ivolve-frontend
+    <<: *service-defaults
+
+    environment:
+      # Service discovery by Compose DNS: `auth-service` and `roadmap-service`
+      # resolve to the container IPs on the ivolve-net bridge network. This is
+      # the same pattern Kubernetes uses, just with a different resolver — which
+      # is why these URLs change only in hostname when moving to EKS.
+      AUTH_SERVICE_URL: http://auth-service:5000
+      ROADMAP_SERVICE_URL: http://roadmap-service:8080
+      # Signs the express-session cookie. Defaults to "change-me-in-k8s" in
+      # server.js — an attacker who knows the default can forge a session
+      # cookie and bypass login entirely, so it is mandatory here.
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required — copy .env.example to .env}
+
+    networks:
+      - ivolve-net
+
+    # Bound to all interfaces (unlike the backends) because this is the public
+    # entry point — open http://localhost:3000 in a browser.
+    ports:
+      - "3000:3000"
+
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      roadmap-service:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    cap_drop:
+      - ALL
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 128M
+
+# ------------------------------------------------------------------------------
+# Networks
+# ------------------------------------------------------------------------------
+networks:
+  # A user-defined bridge network (rather than the default one) gives two things
+  # the default bridge does not: automatic DNS resolution between containers by
+  # service name, and isolation from unrelated containers on the host.
+  ivolve-net:
+    name: ivolve-net
+    driver: bridge
+
+# ------------------------------------------------------------------------------
+# Volumes
+# ------------------------------------------------------------------------------
+volumes:
+  # Persists the MySQL data directory across container recreation.
+  # `docker compose down`  → volume kept, users survive.
+  # `docker compose down -v` → volume deleted, database starts empty.
+  mysql-data:
+    name: ivolve-mysql-data
