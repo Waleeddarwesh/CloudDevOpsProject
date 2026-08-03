@@ -1,0 +1,80 @@
+# ==============================================================================
+# EditorConfig — consistent formatting across editors
+# ==============================================================================
+# Supported natively by VS Code, IntelliJ, Vim and most other editors. It keeps
+# whitespace consistent regardless of who edits a file, which eliminates the
+# "entire file reformatted" diffs that make code review impossible.
+#
+# The YAML rule matters most here: YAML is whitespace-significant, and a single
+# tab character in a Kubernetes manifest is a hard parse error.
+# ==============================================================================
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# ------------------------------------------------------------------------------
+# YAML — Kubernetes, Ansible, Docker Compose, GitHub Actions
+# ------------------------------------------------------------------------------
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# ------------------------------------------------------------------------------
+# Terraform — HCL convention is 2 spaces
+# ------------------------------------------------------------------------------
+[*.{tf,tfvars,hcl}]
+indent_style = space
+indent_size = 2
+
+# ------------------------------------------------------------------------------
+# Groovy — Jenkins shared library
+# ------------------------------------------------------------------------------
+[*.{groovy,Jenkinsfile}]
+indent_style = space
+indent_size = 4
+
+# ------------------------------------------------------------------------------
+# Shell scripts
+# ------------------------------------------------------------------------------
+[*.sh]
+indent_style = space
+indent_size = 4
+# Shell scripts MUST use LF. A CRLF line ending makes the shebang
+# `#!/usr/bin/env bash\r` and the kernel reports "bad interpreter".
+end_of_line = lf
+
+# ------------------------------------------------------------------------------
+# Python
+# ------------------------------------------------------------------------------
+[*.py]
+indent_size = 4
+
+# ------------------------------------------------------------------------------
+# Java
+# ------------------------------------------------------------------------------
+[*.java]
+indent_size = 4
+
+# ------------------------------------------------------------------------------
+# Makefile — tabs are MANDATORY, not a preference
+# ------------------------------------------------------------------------------
+[Makefile]
+indent_style = tab
+
+# ------------------------------------------------------------------------------
+# Markdown
+# ------------------------------------------------------------------------------
+[*.md]
+# Two trailing spaces are a hard line break in Markdown, so trimming them
+# silently changes rendered output.
+trim_trailing_whitespace = false
+
+[*.json]
+indent_size = 2
