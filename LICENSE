@@ -1,0 +1,44 @@
+MIT License
+
+Copyright (c) 2026 Waleed Darwesh
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+THIRD-PARTY NOTICE
+
+The application source under src/ is vendored from:
+
+    https://github.com/Ibrahim-Adel15/iVolveFinalProject
+    commit aa60d92b6f37e3692be71ba8d238e8d4798cbc5a
+
+Application logic (server.js, app.py, RoadmapController.java and the EJS views,
+CSS and images) is unmodified from that upstream commit.
+
+The following files in src/ are ORIGINAL to this repository and are covered by
+the MIT licence above:
+
+    src/*/Dockerfile        — rewritten as hardened multi-stage builds
+    src/*/.dockerignore     — added
+    src/auth-service/requirements.txt — one line added (gunicorn)
+
+All other content in this repository — Terraform modules, Ansible roles,
+Kubernetes manifests, the Jenkins shared library, ArgoCD configuration, the
+monitoring stack and the documentation — is original work.
