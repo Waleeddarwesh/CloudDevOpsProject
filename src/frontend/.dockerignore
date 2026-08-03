@@ -1,0 +1,26 @@
+# Anything listed here is excluded from the build context sent to the Docker
+# daemon. This keeps builds fast, prevents host-built artefacts from leaking
+# into the image, and — most importantly — stops local .env files containing
+# real credentials from being baked into a layer and pushed to ECR.
+
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.npm/
+
+.env
+.env.*
+*.pem
+*.key
+
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+README.md
+*.md
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
