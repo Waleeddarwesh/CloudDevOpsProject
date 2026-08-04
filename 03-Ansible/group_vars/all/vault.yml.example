@@ -1,0 +1,75 @@
+# ==============================================================================
+# Ansible Vault — secret variables TEMPLATE
+# ==============================================================================
+# This .example file is committed so the required variable NAMES are documented.
+# The real vault.yml is encrypted and gitignored.
+#
+# ------------------------------------------------------------------------------
+# Creating your encrypted vault
+# ------------------------------------------------------------------------------
+#   1. Create the vault password file (gitignored):
+#          openssl rand -base64 32 > .vault_pass
+#          chmod 600 .vault_pass
+#
+#   2. Create the encrypted vault, using this file as the starting content:
+#          cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#          # edit group_vars/all/vault.yml, replacing every CHANGE_ME
+#          ansible-vault encrypt group_vars/all/vault.yml
+#
+#   3. Confirm it is encrypted — the file should now begin with
+#      $ANSIBLE_VAULT;1.1;AES256 and be unreadable:
+#          head -1 group_vars/all/vault.yml
+#
+# ------------------------------------------------------------------------------
+# Working with the vault afterwards
+# ------------------------------------------------------------------------------
+#   ansible-vault view   group_vars/all/vault.yml    # read without decrypting on disk
+#   ansible-vault edit   group_vars/all/vault.yml    # edit in place, re-encrypts on save
+#   ansible-vault rekey  group_vars/all/vault.yml    # change the password
+#   ansible-vault decrypt group_vars/all/vault.yml   # permanently decrypt (avoid)
+#
+# ansible.cfg sets `vault_password_file = ./.vault_pass`, so ansible-playbook
+# decrypts automatically with no extra flags.
+#
+# ------------------------------------------------------------------------------
+# Naming convention
+# ------------------------------------------------------------------------------
+# Every variable here is prefixed `vault_`. This is a widely-used convention
+# with a practical purpose: an encrypted file is opaque to grep, so when a task
+# references a bare `sonarqube_admin_password` you cannot tell where it came
+# from. The prefix makes the origin obvious at the point of use, and the usual
+# pattern is to indirect through group_vars/all/main.yml:
+#
+#     sonarqube_admin_password: "{{ vault_sonarqube_admin_password }}"
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# SonarQube
+# ------------------------------------------------------------------------------
+# Replaces the default admin/admin on first boot. SonarQube exposes project
+# source code and its analysis history; leaving the default credentials on a
+# publicly-reachable port hands over the entire codebase.
+vault_sonarqube_admin_password: "CHANGE_ME_strong_sonarqube_password"
+
+# Password for the PostgreSQL database backing SonarQube.
+vault_sonarqube_db_password: "CHANGE_ME_strong_postgres_password"
+
+# ------------------------------------------------------------------------------
+# Jenkins
+# ------------------------------------------------------------------------------
+# Used only when Jenkins Configuration-as-Code (JCasC) provisions the admin
+# account. Leave as-is if you complete the setup wizard by hand.
+vault_jenkins_admin_username: "admin"
+vault_jenkins_admin_password: "CHANGE_ME_strong_jenkins_password"
+
+# ------------------------------------------------------------------------------
+# GitHub
+# ------------------------------------------------------------------------------
+# Fine-grained Personal Access Token used by the pipeline to push updated
+# Kubernetes manifests back to the repository.
+#
+# Required scope: Contents → Read and write, on the CloudDevOpsProject
+# repository ONLY. A classic token with full `repo` scope grants access to every
+# repository you own — never use one here.
+vault_github_username: "WaleedDarwesh"
+vault_github_token: "CHANGE_ME_github_personal_access_token"
