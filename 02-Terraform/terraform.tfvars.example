@@ -1,0 +1,99 @@
+# ==============================================================================
+# Terraform variable values — TEMPLATE
+# ==============================================================================
+#   cp terraform.tfvars.example terraform.tfvars
+#   # edit the two REQUIRED values below
+#   terraform plan
+#
+# terraform.tfvars is gitignored. Everything here is non-secret configuration,
+# but the file is excluded anyway so nobody's home IP address ends up in a
+# public repository.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Project identity
+# ------------------------------------------------------------------------------
+project_name = "ivolve"
+environment  = "dev"
+owner        = "waleed-darwesh"
+aws_region   = "us-east-1"
+
+# ------------------------------------------------------------------------------
+# REQUIRED — network access control
+# ------------------------------------------------------------------------------
+# Terraform REFUSES TO APPLY while these are empty or set to 0.0.0.0/0.
+# An SSH port open to the internet is found by automated scanners within
+# minutes; the usual outcome is a crypto-mining bill.
+#
+# Find your public IP:
+#     curl -s https://checkip.amazonaws.com
+#
+# Then set both to that address with a /32 suffix:
+allowed_ssh_cidrs        = ["203.0.113.9/32"] # ← REPLACE with YOUR_IP/32
+allowed_jenkins_ui_cidrs = ["203.0.113.9/32"] # ← REPLACE with YOUR_IP/32
+
+# ------------------------------------------------------------------------------
+# Networking
+# ------------------------------------------------------------------------------
+vpc_cidr             = "10.0.0.0/16"
+availability_zones   = ["us-east-1a", "us-east-1b"]
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24"]
+
+# true  = one shared NAT Gateway  (~$32/month, single point of failure)
+# false = one NAT Gateway per AZ  (~$64/month, survives an AZ outage)
+single_nat_gateway = true
+
+enable_flow_logs         = true
+flow_logs_retention_days = 14
+
+# ------------------------------------------------------------------------------
+# Jenkins server
+# ------------------------------------------------------------------------------
+# The key pair must ALREADY EXIST in this region. Create it with:
+#   aws ec2 create-key-pair --key-name ivolve-key \
+#     --query KeyMaterial --output text > ~/.ssh/ivolve-key.pem
+#   chmod 400 ~/.ssh/ivolve-key.pem
+key_name = "ivolve-key"
+
+jenkins_instance_type    = "t3.medium"
+jenkins_root_volume_size = 50
+enable_sonarqube         = true
+
+# ------------------------------------------------------------------------------
+# EKS
+# ------------------------------------------------------------------------------
+kubernetes_version  = "1.31"
+node_instance_types = ["t3.medium"]
+node_desired_size   = 2
+node_min_size       = 2
+node_max_size       = 4
+node_disk_size      = 30
+
+# Narrow this to ["YOUR_IP/32", "JENKINS_EIP/32"] once you know the Jenkins EIP.
+# Requests are always SigV4-signed, but a restricted endpoint is not enumerable.
+cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+
+cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+# Extra IAM users/roles needing kubectl access. The identity running
+# `terraform apply` is granted admin automatically — leave this empty for solo work.
+# cluster_admin_principals = ["arn:aws:iam::123456789012:user/teammate"]
+cluster_admin_principals = []
+
+# ------------------------------------------------------------------------------
+# ECR
+# ------------------------------------------------------------------------------
+# These names must match the `imageName` passed to the Jenkins shared library
+# in 05-Jenkins/Jenkinsfiles/.
+ecr_repository_names = [
+  "ivolve-frontend",
+  "ivolve-auth-service",
+  "ivolve-roadmap-service",
+]
+
+ecr_image_retention_count = 10
+
+# true lets `terraform destroy` remove repositories that still hold images.
+# Set to false for anything you cannot afford to lose.
+ecr_force_delete = true
