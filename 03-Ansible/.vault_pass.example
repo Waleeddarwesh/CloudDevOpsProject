@@ -1,0 +1,18 @@
+REPLACE_THIS_ENTIRE_FILE_WITH_A_RANDOM_PASSWORD
+
+# ==============================================================================
+# Ansible Vault password file
+# ==============================================================================
+# Copy to .vault_pass (gitignored), replacing the contents with a strong random
+# value and NOTHING else — no comments, no trailing blank lines. Ansible reads
+# the whole file as the password.
+#
+#     openssl rand -base64 32 > .vault_pass
+#     chmod 600 .vault_pass
+#
+# ansible.cfg points at this path, so ansible-playbook decrypts group_vars/all/
+# vault.yml automatically.
+#
+# Store the real password in a password manager. Lose it and the vault is
+# unrecoverable — Vault uses AES-256 with no backdoor and no reset.
+# ==============================================================================
