@@ -1,0 +1,123 @@
+---
+# ==============================================================================
+# Variables applied to every host
+# ==============================================================================
+# Ansible resolves variables by precedence. group_vars/all sits near the bottom,
+# which is exactly right for project-wide defaults: a role's defaults/main.yml
+# is overridden by these values, and these in turn are overridden by anything
+# passed with -e on the command line.
+#
+# Secrets do NOT belong here — this file is committed. They live in vault.yml,
+# encrypted with Ansible Vault.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Project identity
+# ------------------------------------------------------------------------------
+project_name: ivolve
+environment_name: dev
+aws_region: us-east-1
+
+# ------------------------------------------------------------------------------
+# Versions
+# ------------------------------------------------------------------------------
+# Pinned deliberately. "latest" means the server you build today and the one you
+# rebuild in six months are different machines, and a Jenkins that worked
+# yesterday can break after an unattended upgrade.
+
+# Jenkins requires Java 17 or 21. 17 is the long-term-support baseline that the
+# widest range of plugins is tested against.
+java_version: 17
+
+# Trivy is installed from the Aqua Security APT repository so `apt upgrade`
+# keeps it current, rather than pinning a .deb URL that goes stale.
+trivy_version: "latest"
+
+# Must match, or be within one minor version of, the EKS control-plane version
+# set in 02-Terraform/variables.tf. kubectl supports ±1 minor version skew.
+kubectl_version: "1.31"
+
+helm_version: "latest"
+
+# ------------------------------------------------------------------------------
+# Feature switches
+# ------------------------------------------------------------------------------
+# Disable with:  ansible-playbook playbook.yml -e sonarqube_enabled=false
+sonarqube_enabled: true
+
+# ------------------------------------------------------------------------------
+# Jenkins
+# ------------------------------------------------------------------------------
+jenkins_http_port: 8080
+jenkins_home: /var/lib/jenkins
+
+# Plugins installed non-interactively via jenkins-plugin-cli, so a rebuilt
+# server has an identical plugin set instead of whatever the operator happened
+# to click through in the setup wizard.
+jenkins_plugins:
+  # --- Pipeline core ---
+  - workflow-aggregator        # Declarative + Scripted Pipeline
+  - pipeline-stage-view        # the stage-by-stage build visualisation
+  - workflow-cps-global-lib    # Global Shared Libraries (Phase 5 depends on this)
+
+  # --- SCM ---
+  - git
+  - github
+  - github-branch-source
+
+  # --- Credentials ---
+  - credentials
+  - credentials-binding        # withCredentials() in the pipeline
+  - plain-credentials
+  - ssh-credentials
+
+  # --- Cloud / containers ---
+  - docker-workflow            # docker.build(), docker.withRegistry()
+  - amazon-ecr
+  - aws-credentials
+  - kubernetes-cli             # withKubeConfig()
+
+  # --- Quality and security ---
+  - sonar                      # SonarQube Scanner + waitForQualityGate()
+  - warnings-ng                # aggregates Trivy / linter reports
+
+  # --- Authorization (internship Lab 21) ---
+  - matrix-auth                # project-based matrix authorization strategy
+  - role-strategy              # role-based access control
+
+  # --- Usability ---
+  - blueocean
+  - timestamper                # prefixes console output with timestamps
+  - ws-cleanup                 # cleanWs() in post blocks
+  - build-timeout
+  - ansicolor
+  - configuration-as-code      # JCasC, for reproducible controller config
+
+# ------------------------------------------------------------------------------
+# SonarQube
+# ------------------------------------------------------------------------------
+sonarqube_port: 9000
+# LTS Community edition — the supported long-term release line.
+sonarqube_image: sonarqube:lts-community
+sonarqube_data_dir: /opt/sonarqube
+
+# ------------------------------------------------------------------------------
+# Docker
+# ------------------------------------------------------------------------------
+# Users added to the `docker` group. NOTE this is equivalent to granting root:
+# any member can run `docker run -v /:/host --privileged` and take over the
+# machine. Acceptable for the CI user on a dedicated build server; never grant
+# it casually.
+docker_users:
+  - ubuntu
+  - jenkins
+
+# ------------------------------------------------------------------------------
+# Shared library
+# ------------------------------------------------------------------------------
+# Jenkins Global Shared Libraries require `vars/` at the ROOT of the repository
+# they are loaded from. This project's copy lives at 05-Jenkins/vars/, which
+# Jenkins cannot consume directly, so it is mirrored to a dedicated repository.
+# See 05-Jenkins/README.md for the sync script.
+shared_library_repo: "https://github.com/Waleeddarwesh/jenkins-shared-library.git"
+shared_library_name: "shared-library"
