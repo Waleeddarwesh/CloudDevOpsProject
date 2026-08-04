@@ -1,0 +1,123 @@
+# ==============================================================================
+# AWS EC2 Dynamic Inventory
+# ==============================================================================
+# Instead of a static file listing IP addresses, Ansible queries the EC2 API at
+# runtime and builds the inventory from live infrastructure.
+#
+# Why this matters here: Terraform creates the Jenkins instance, and its public
+# IP is not known until after `terraform apply`. A static inventory would have
+# to be edited by hand after every apply — and would silently target a dead host
+# after any instance replacement.
+#
+#   ┌────────────┐   filters: tag:Role=jenkins    ┌──────────────┐
+#   │  Ansible   │ ─────────────────────────────► │  EC2 API     │
+#   │  Control   │                                 └──────┬───────┘
+#   └────────────┘ ◄───────────────────────────────────── │
+#          group: role_jenkins → 54.x.x.x                 │
+#
+# THE FILENAME MATTERS. It must end in `aws_ec2.yml` or `aws_ec2.yaml`, or the
+# plugin refuses to load it and the play reports "no hosts matched".
+#
+# Verify before running the playbook:
+#     ansible-inventory --graph
+#     ansible-inventory --list
+#     ansible role_jenkins -m ping
+# ==============================================================================
+
+# Fully-qualified plugin name. The short form `aws_ec2` still works but is
+# deprecated and will be removed.
+plugin: amazon.aws.aws_ec2
+
+# ------------------------------------------------------------------------------
+# Where to look
+# ------------------------------------------------------------------------------
+# Each region is a separate API call, so list only the ones actually in use.
+regions:
+  - us-east-1
+
+# ------------------------------------------------------------------------------
+# What to match
+# ------------------------------------------------------------------------------
+filters:
+  # This tag is set by the Terraform server module (modules/server/main.tf).
+  # The two must stay in sync — change one and Ansible finds nothing.
+  tag:Role: jenkins
+
+  # Without this, terminated and stopped instances are still returned and the
+  # playbook wastes 30 seconds timing out against a machine that no longer
+  # exists. AWS keeps terminated instances visible in the API for ~1 hour.
+  instance-state-name:
+    - running
+
+# ------------------------------------------------------------------------------
+# How hosts are named
+# ------------------------------------------------------------------------------
+# Prefer the Name tag for readable output ("ivolve-dev-jenkins" rather than
+# "ec2-54-234-1-9.compute-1.amazonaws.com"), falling back to the public DNS
+# name if the tag is absent.
+hostnames:
+  - tag:Name
+  - dns-name
+
+# ------------------------------------------------------------------------------
+# Grouping
+# ------------------------------------------------------------------------------
+# Builds Ansible groups from instance attributes, so playbooks can target
+# `role_jenkins` rather than hardcoded addresses.
+keyed_groups:
+  # tag Role=jenkins  →  group `role_jenkins`  (used by playbook.yml)
+  - key: tags.Role
+    prefix: role
+    separator: "_"
+
+  # tag Environment=dev  →  group `env_dev`
+  - key: tags.Environment
+    prefix: env
+    separator: "_"
+
+  # Availability Zone  →  group `az_us_east_1a`
+  - key: placement.availability_zone
+    prefix: az
+    separator: "_"
+
+# Human-readable aliases for the groups above.
+groups:
+  jenkins_servers: "'jenkins' in (tags.Role | default(''))"
+
+# ------------------------------------------------------------------------------
+# Host variables
+# ------------------------------------------------------------------------------
+# `compose` builds host vars from Jinja expressions evaluated against the EC2
+# instance data. Note the nested quoting: the expression is evaluated as Jinja,
+# so a literal string must be quoted twice — "'ubuntu'" yields the string
+# ubuntu, whereas "ubuntu" would be treated as an undefined variable.
+compose:
+  # Connect over the public IP. Switch to private_ip_address when running
+  # Ansible from a bastion or from inside the VPC.
+  ansible_host: public_ip_address
+  ansible_user: "'ubuntu'"
+  ansible_ssh_private_key_file: "'~/.ssh/ivolve-key.pem'"
+
+  # Convenience facts referenced by the roles.
+  ec2_instance_id: instance_id
+  ec2_instance_type: instance_type
+
+# ------------------------------------------------------------------------------
+# Caching
+# ------------------------------------------------------------------------------
+# Avoids an EC2 API round trip on every single ansible/ansible-playbook
+# invocation. Delete ./.ansible_inventory_cache after a `terraform apply` that
+# replaces the instance, or pass --flush-cache.
+cache: true
+cache_plugin: jsonfile
+cache_connection: ./.ansible_inventory_cache
+cache_timeout: 300
+
+# ------------------------------------------------------------------------------
+# Credentials
+# ------------------------------------------------------------------------------
+# Deliberately absent. The plugin resolves credentials through the standard
+# boto3 chain: environment variables → ~/.aws/credentials → IAM role.
+#
+# NEVER put aws_access_key / aws_secret_key in this file — it is committed to
+# Git, and a leaked key in a public repository is exploited within minutes.
