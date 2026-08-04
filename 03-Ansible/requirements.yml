@@ -1,0 +1,35 @@
+# ==============================================================================
+# Ansible Galaxy dependencies
+# ==============================================================================
+# Ansible's "batteries included" package ships thousands of modules, but the
+# minimal `ansible-core` package does not. Declaring dependencies here makes the
+# requirement explicit and reproducible.
+#
+# Install with:
+#     ansible-galaxy collection install -r requirements.yml
+#
+# Also install the Python SDK the aws_ec2 plugin needs:
+#     pip install boto3 botocore
+# ==============================================================================
+
+collections:
+  # Provides the amazon.aws.aws_ec2 dynamic inventory plugin used by
+  # inventory/aws_ec2.yml, plus the aws_* modules.
+  - name: amazon.aws
+    version: ">=9.0.0"
+
+  # community.docker.docker_container / docker_compose_v2, used by the
+  # sonarqube role to run SonarQube as a container.
+  - name: community.docker
+    version: ">=4.0.0"
+
+  # community.general.deb822_repository — the modern, idempotent way to add an
+  # APT repository. Replaces the deprecated apt_key module, which used the
+  # legacy trusted.gpg keyring that APT now warns about on every run.
+  - name: community.general
+    version: ">=10.0.0"
+
+  # ansible.posix.sysctl, used to raise vm.max_map_count for Elasticsearch,
+  # which SonarQube embeds.
+  - name: ansible.posix
+    version: ">=1.6.0"
