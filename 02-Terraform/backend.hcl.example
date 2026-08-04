@@ -1,0 +1,22 @@
+# ==============================================================================
+# Backend configuration template
+# ==============================================================================
+# Copy to backend.hcl (gitignored) and fill in the bucket produced by the
+# ./bootstrap module, then initialise:
+#
+#     cp backend.hcl.example backend.hcl
+#     terraform init -backend-config=backend.hcl
+#
+# Kept out of backend.tf because S3 bucket names are globally unique — hardcoding
+# one means nobody else can ever run this code without editing tracked files.
+# ==============================================================================
+
+# Output `state_bucket_name` from the bootstrap module.
+# Convention: ivolve-tfstate-<aws-account-id>-<region>
+bucket = "ivolve-tfstate-123456789012-us-east-1"
+
+# Path of the state object inside the bucket. Give every environment its own
+# key so dev and prod state can never overwrite one another.
+key = "capstone/dev/terraform.tfstate"
+
+region = "us-east-1"
