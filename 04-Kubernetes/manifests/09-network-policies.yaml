@@ -1,0 +1,279 @@
+# ==============================================================================
+# Network Policies — pod-level firewall rules
+# ==============================================================================
+# By default, Kubernetes networking is COMPLETELY FLAT: every pod can reach
+# every other pod in the entire cluster. A compromised frontend container can
+# open a TCP connection straight to MySQL and try credentials, and nothing in
+# the default configuration stops it.
+#
+# NetworkPolicies close that. The model has two properties that trip people up:
+#
+#   1. They are ADDITIVE (allow-only). There is no "deny" rule — you deny by
+#      not allowing.
+#   2. A pod is "unselected" until some policy selects it, and unselected pods
+#      allow everything. The moment ANY policy selects a pod, that pod switches
+#      to default-deny for the direction(s) the policy covers.
+#
+# Hence the default-deny policy below: it is what flips the namespace from
+# allow-all to deny-all, after which each service-specific policy re-opens
+# exactly one path.
+#
+# ------------------------------------------------------------------------------
+# ⚠️  REQUIRES A CNI THAT ENFORCES NETWORKPOLICY
+# ------------------------------------------------------------------------------
+# The AWS VPC CNI enforces NetworkPolicy only when explicitly enabled
+# (v1.14+ with `--set enableNetworkPolicy=true`, or the EKS add-on's
+# `enableNetworkPolicy: "true"` configuration). Without that, these objects are
+# accepted by the API server and SILENTLY IGNORED — which is far more dangerous
+# than having no policy at all, because the cluster looks protected.
+#
+# Verify enforcement with:
+#     kubectl exec -n ivolve deploy/frontend -- nc -zv mysql 3306
+# It should TIME OUT. If it connects, enforcement is not active.
+#
+# Enable on the EKS add-on:
+#     aws eks update-addon --cluster-name ivolve-dev-eks --addon-name vpc-cni \
+#       --configuration-values '{"enableNetworkPolicy":"true"}'
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Default deny — the foundation
+# ------------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/part-of: ivolve
+spec:
+  # An EMPTY podSelector selects EVERY pod in the namespace. This is the
+  # idiomatic way to express "applies to all".
+  podSelector: {}
+
+  # Listing both directions with no rules below means: deny all ingress AND all
+  # egress for every pod, unless another policy allows it.
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ------------------------------------------------------------------------------
+# 2. Allow DNS for every pod
+# ------------------------------------------------------------------------------
+# This must come first in practice, because the default-deny above blocks
+# egress to CoreDNS — and without DNS, `auth-service` cannot resolve `mysql`,
+# so EVERY service breaks in a way that looks like a connectivity problem
+# rather than a DNS one.
+#
+# This is the single most common mistake when adopting NetworkPolicy.
+# ------------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/part-of: ivolve
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              # Well-known label present on kube-system in every modern cluster.
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        # Both protocols are required. DNS uses UDP for normal queries and
+        # falls back to TCP for responses larger than 512 bytes — allowing only
+        # UDP produces intermittent, size-dependent resolution failures that are
+        # miserable to debug.
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ------------------------------------------------------------------------------
+# 3. Frontend
+# ------------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-policy
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/part-of: ivolve
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # From the ALB. The load balancer's ENIs live in the VPC but are NOT pods,
+    # so they cannot be matched by a podSelector — an ipBlock covering the VPC
+    # CIDR is the only way to express this.
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/16
+      ports:
+        - protocol: TCP
+          port: 3000
+
+  egress:
+    # To auth-service — for POST /login and POST /signup.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: auth-service
+      ports:
+        - protocol: TCP
+          port: 5000
+
+    # To roadmap-service — for GET /roadmap.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: roadmap-service
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # NOTE what is NOT here: no rule permitting egress to MySQL on 3306. The
+    # frontend has no business talking to the database, and now it provably
+    # cannot — even if an attacker achieves code execution inside it.
+
+---
+# ------------------------------------------------------------------------------
+# 4. Auth service
+# ------------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: auth-service-policy
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/part-of: ivolve
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # ONLY the frontend may call this service. Nothing else in the namespace can
+    # reach the authentication API.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: frontend
+      ports:
+        - protocol: TCP
+          port: 5000
+
+    # Allow the monitoring namespace to scrape / probe this service.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 5000
+
+  egress:
+    # To MySQL. This is the ONLY policy in the namespace that opens port 3306.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mysql
+      ports:
+        - protocol: TCP
+          port: 3306
+
+---
+# ------------------------------------------------------------------------------
+# 5. Roadmap service
+# ------------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: roadmap-service-policy
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/part-of: ivolve
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: roadmap-service
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  # No egress rules beyond DNS (granted globally above). The service is
+  # stateless and calls nothing — so it is allowed to call nothing.
+  egress: []
+
+---
+# ------------------------------------------------------------------------------
+# 6. MySQL — the most valuable policy here
+# ------------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mysql-policy
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/part-of: ivolve
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # EXACTLY ONE source is permitted to reach port 3306: the auth-service pods.
+    #
+    # This mirrors the application's real architecture — auth-service is the
+    # only component with a database driver — and enforces it at the network
+    # layer rather than trusting that nobody adds a second one later.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: auth-service
+      ports:
+        - protocol: TCP
+          port: 3306
+
+  # A database initiates no outbound connections. Denying egress entirely means
+  # that even with SQL injection reaching the filesystem, the pod cannot
+  # exfiltrate data to an external host.
+  egress: []
