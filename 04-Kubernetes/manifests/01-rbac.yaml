@@ -1,0 +1,189 @@
+# ==============================================================================
+# RBAC — ServiceAccounts, Role and RoleBinding
+# ==============================================================================
+# Every pod authenticates to the Kubernetes API as a ServiceAccount. If none is
+# specified, it silently uses the namespace's `default` ServiceAccount — and
+# because every pod in the namespace shares that identity, an audit log entry
+# for `default` cannot be traced back to which workload made the call.
+#
+# Each microservice therefore gets its OWN ServiceAccount with:
+#
+#   automountServiceAccountToken: false
+#
+# None of these three services talk to the Kubernetes API at all. Mounting a
+# token they never use just places a valid credential inside a container that an
+# attacker might reach — the first thing a container-escape toolkit looks for is
+# /var/run/secrets/kubernetes.io/serviceaccount/token.
+# ==============================================================================
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: ivolve
+# The frontend renders HTML and calls two internal HTTP APIs. It has no reason
+# to hold a Kubernetes API credential.
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: auth-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/part-of: ivolve
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: roadmap-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: roadmap-service
+    app.kubernetes.io/part-of: ivolve
+automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mysql
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/part-of: ivolve
+automountServiceAccountToken: false
+
+---
+# ==============================================================================
+# Read-only Role for CI / operators
+# ==============================================================================
+# Grants the ability to INSPECT workloads without changing them — enough to
+# verify a rollout or read logs during an incident, and nothing more.
+#
+# A Role is namespaced (this one only applies inside `ivolve`), unlike a
+# ClusterRole which applies cluster-wide. Prefer Role wherever possible.
+# ==============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ivolve-viewer
+  namespace: ivolve
+rules:
+  # Core API group (""), the workload primitives.
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log       # a SEPARATE resource from `pods` — reading logs needs it explicitly
+      - services
+      - endpoints
+      - persistentvolumeclaims
+      - events         # the first place to look when a pod will not start
+    verbs: ["get", "list", "watch"]
+
+  # Note that `configmaps` is included but `secrets` is NOT. Read access to
+  # Secrets is read access to the database password — "read-only" is not the
+  # same as harmless.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - replicasets
+      - deployments/status
+      - statefulsets/status
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+
+  # Required by `kubectl top pods`.
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+---
+# ------------------------------------------------------------------------------
+# Deployment Role — what CI actually needs to ship a release
+# ------------------------------------------------------------------------------
+# In the GitOps model ArgoCD performs the apply, so Jenkins needs this only for
+# the optional `kubectl rollout status` verification stage.
+#
+# Deliberately EXCLUDES create/delete on Roles and RoleBindings: a pipeline that
+# can edit RBAC can grant itself cluster-admin, so anyone able to modify a
+# Jenkinsfile could take over the cluster.
+# ------------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ivolve-deployer
+  namespace: ivolve
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "events"]
+    verbs: ["get", "list", "watch"]
+
+  # Permits a rollout restart, which is implemented as a pod deletion.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+
+---
+# ------------------------------------------------------------------------------
+# RoleBinding — connects the Role to a subject
+# ------------------------------------------------------------------------------
+# The `ivolve-ci` group is asserted by the EKS Access Entry that Terraform
+# creates for the Jenkins instance role
+# (02-Terraform/modules/eks/access.tf → kubernetes_groups: ["ivolve-ci"]).
+#
+# That is the full chain:
+#   EC2 instance profile → IAM role → EKS Access Entry → Kubernetes group →
+#   RoleBinding → Role → permissions.
+# ------------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ivolve-ci-deployer
+  namespace: ivolve
+subjects:
+  - kind: Group
+    name: ivolve-ci
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: ivolve-deployer
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ivolve-ci-viewer
+  namespace: ivolve
+subjects:
+  - kind: Group
+    name: ivolve-ci
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: ivolve-viewer
+  apiGroup: rbac.authorization.k8s.io
