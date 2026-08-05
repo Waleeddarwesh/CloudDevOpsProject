@@ -1,0 +1,9 @@
+---
+# Jenkins supports 17 and 21. Overridden from group_vars/all/main.yml.
+java_version: 17
+
+# Maps the architecture Ansible reports to the suffix Debian uses in the JVM
+# path, so this role works unchanged on both x86_64 and Graviton instances.
+java_arch_map:
+  x86_64: amd64
+  aarch64: arm64

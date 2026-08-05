@@ -1,0 +1,79 @@
+---
+# ==============================================================================
+# Role: java — OpenJDK runtime for Jenkins
+# ==============================================================================
+# Jenkins is a Java application and the Debian package does NOT declare a JRE
+# dependency. Install Jenkins without a JVM and the service fails to start with
+# a bare "jenkins.service: Failed with result 'exit-code'" and nothing useful in
+# the journal — which is why this role MUST run before the jenkins role.
+#
+# Jenkins supports Java 17 and 21. 17 is chosen as the LTS baseline with the
+# broadest plugin compatibility.
+# ==============================================================================
+
+- name: Install OpenJDK {{ java_version }}
+  ansible.builtin.apt:
+    name:
+      # The full JDK, not just the JRE. The JDK provides keytool (used to add
+      # certificates to the Java trust store) and jstack/jmap, without which
+      # diagnosing a hung Jenkins is guesswork.
+      - "openjdk-{{ java_version }}-jdk"
+    state: present
+    update_cache: true
+  register: java_install
+  retries: 3
+  delay: 5
+  until: java_install is succeeded
+
+- name: Locate the installed JVM
+  # Resolved dynamically rather than hardcoded, because the path embeds the
+  # architecture (…-amd64 vs …-arm64) and would break on a Graviton instance.
+  ansible.builtin.command: >-
+    readlink -f /usr/lib/jvm/java-{{ java_version }}-openjdk-{{ java_arch_map[ansible_facts['architecture']] }}
+  register: java_home_path
+  changed_when: false
+
+- name: Set JAVA_HOME system-wide
+  # Maven, the Jenkins agent and the SonarQube scanner all read JAVA_HOME.
+  # /etc/profile.d is sourced by every login shell.
+  ansible.builtin.copy:
+    dest: /etc/profile.d/java.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible — do not edit by hand.
+      export JAVA_HOME={{ java_home_path.stdout }}
+      export PATH=$JAVA_HOME/bin:$PATH
+
+- name: Register the default java alternative
+  # Ubuntu can host several JDKs simultaneously. This pins `java` and `javac`
+  # to the version installed above, so a later JDK arriving as a transitive
+  # dependency cannot silently switch the version Jenkins runs on.
+  community.general.alternatives:
+    name: "{{ item }}"
+    path: "{{ java_home_path.stdout }}/bin/{{ item }}"
+    link: "/usr/bin/{{ item }}"
+  loop:
+    - java
+    - javac
+
+- name: Verify the Java installation
+  ansible.builtin.command: java -version
+  register: java_verify
+  changed_when: false
+
+- name: Assert the correct Java version is active
+  # Catches the case where another JDK won the alternatives race — a failure
+  # that would otherwise only surface later as an unstartable Jenkins.
+  #
+  # `java -version` writes to STDERR, not stdout — a long-standing quirk of the
+  # JVM. Checking stdout here would always find an empty string and the assert
+  # would pass regardless of the installed version.
+  ansible.builtin.assert:
+    that:
+      - java_verify.stderr is search('version "' ~ java_version)
+    fail_msg: >-
+      Expected Java {{ java_version }} but found:
+      {{ java_verify.stderr_lines[0] | default('unknown') }}
+    success_msg: "{{ java_verify.stderr_lines[0] | default('Java verified') }}"
