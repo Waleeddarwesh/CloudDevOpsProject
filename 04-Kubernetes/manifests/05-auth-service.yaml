@@ -1,0 +1,385 @@
+# ==============================================================================
+# Auth Service — Deployment, Service, HPA, PodDisruptionBudget
+# ==============================================================================
+# Python 3.12 / Flask on port 5000. The ONLY service that talks to MySQL.
+#
+# Endpoints (from src/auth-service/app.py):
+#   GET  /health            → {"status":"UP"}  or 503 when the database is down
+#   POST /api/auth/signup   → creates a user, bcrypt-hashing the password
+#   POST /api/auth/login    → validates credentials
+#
+# It creates the `users` table itself on first connection
+# (ensure_database_ready), so no schema migration job is required.
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    # Applied after the database (wave 1).
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: 2
+
+  # Keep the last 3 ReplicaSets so `kubectl rollout undo` has something to roll
+  # back to. The default of 10 clutters the namespace with dead ReplicaSets.
+  revisionHistoryLimit: 3
+
+  # Fail a stuck rollout after 5 minutes instead of hanging indefinitely. Without
+  # this, a bad image leaves the Deployment "progressing" forever and ArgoCD
+  # never reports Degraded.
+  progressDeadlineSeconds: 300
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # With 2 replicas: at most 1 extra pod during the roll (3 total), and
+      # never fewer than 1 serving. Zero-downtime by construction.
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth-service
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ivolve
+    spec:
+      serviceAccountName: auth-service
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        # uid 10001 = the `appuser` account created in the service's Dockerfile.
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+
+      # ------------------------------------------------------------------------
+      # Spread replicas across Availability Zones
+      # ------------------------------------------------------------------------
+      # Without this, the scheduler may place both replicas on the same node —
+      # and a single node failure then takes the whole service down despite
+      # having two replicas.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          # ScheduleAnyway, not DoNotSchedule: on a 2-node cluster a hard
+          # constraint leaves pods Pending when one zone is full.
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: auth-service
+
+      # ------------------------------------------------------------------------
+      # Init container — wait for MySQL
+      # ------------------------------------------------------------------------
+      # Init containers run to completion, in order, BEFORE any app container
+      # starts. If one fails, the pod restarts it until it succeeds.
+      #
+      # This exists because auth-service opens a database connection during
+      # startup. Without the gate the pod crash-loops while MySQL initialises,
+      # and CrashLoopBackOff's exponential delay means the service can stay down
+      # for minutes AFTER the database is ready.
+      #
+      # Gating here rather than in application code keeps the retry logic out of
+      # the app, where it does not belong.
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MySQL at ${DB_HOST}:${DB_PORT}..."
+              # `nc -z` performs a TCP connect test without sending data.
+              until nc -z "${DB_HOST}" "${DB_PORT}"; do
+                echo "  MySQL not reachable yet — retrying in 3s"
+                sleep 3
+              done
+              echo "MySQL is accepting connections."
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: ivolve-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: ivolve-config
+                  key: DB_PORT
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+
+      containers:
+        - name: auth-service
+          # Rewritten by Kustomize — see kustomization.yaml `images:`. The
+          # Jenkins pipeline runs `kustomize edit set image` rather than a
+          # regex substitution, so only THIS image reference changes.
+          image: ivolve-auth-service:dev
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+
+          # --------------------------------------------------------------------
+          # Environment
+          # --------------------------------------------------------------------
+          # Names match src/auth-service/app.py exactly:
+          #     DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+          # (note DB_USER, not DB_USERNAME — app.py validates all five and
+          # raises RuntimeError listing any that are missing).
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef: { name: ivolve-config, key: DB_HOST }
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef: { name: ivolve-config, key: DB_PORT }
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef: { name: ivolve-config, key: DB_NAME }
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef: { name: ivolve-config, key: DB_USER }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ivolve-secret, key: DB_PASSWORD }
+
+          # --------------------------------------------------------------------
+          # Probes — note that liveness and readiness use DIFFERENT checks
+          # --------------------------------------------------------------------
+          # This distinction is the important part of this manifest.
+          #
+          # /health in app.py calls ensure_database_ready() and returns 503 when
+          # MySQL is unreachable. Using it for LIVENESS would be a serious bug:
+          # a brief database outage would fail liveness on every auth-service
+          # pod, Kubernetes would restart them all, and restarting does nothing
+          # to fix a database problem — it just guarantees a cold start and a
+          # thundering herd the moment MySQL returns.
+          #
+          # So:
+          #   liveness  → TCP connect. Answers "is the process alive?"
+          #   readiness → GET /health. Answers "can it serve requests?"
+          #
+          # During a database outage the pods stay UP but leave the Service
+          # endpoints. When MySQL recovers, readiness passes again and traffic
+          # resumes with no restart.
+
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            # One success is enough to return to the endpoint list.
+            successThreshold: 1
+
+          # Covers a slow first start (gunicorn boot + the initial table
+          # creation) without loosening the steady-state liveness settings.
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30 # 150s budget
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              # 4× the request — within the maxLimitRequestRatio of 4 set by the
+              # LimitRange in 00-namespace.yaml. A higher limit would be
+              # rejected at admission.
+              cpu: 400m
+              memory: 512Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # An immutable root filesystem: an attacker who achieves code
+            # execution cannot drop a binary, modify app.py, or install a
+            # persistence mechanism.
+            readOnlyRootFilesystem: true
+
+          volumeMounts:
+            # gunicorn writes worker heartbeat files here. With a read-only root
+            # filesystem and no writable /tmp, workers are killed and restarted
+            # every 30 seconds — a genuinely confusing failure mode.
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            # Backed by tmpfs (RAM), not disk. Fast, and wiped on pod restart.
+            medium: Memory
+            sizeLimit: 64Mi
+
+---
+# ------------------------------------------------------------------------------
+# Service — stable internal address
+# ------------------------------------------------------------------------------
+# ClusterIP: reachable only from inside the cluster. The auth service handles
+# credentials and must never be exposed directly; all external traffic arrives
+# through the frontend.
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ivolve
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 5000
+      # Refers to the container port by NAME rather than number. If the port is
+      # ever changed in the Deployment, the Service follows automatically.
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: auth-service
+
+---
+# ------------------------------------------------------------------------------
+# HorizontalPodAutoscaler
+# ------------------------------------------------------------------------------
+# REQUIRES metrics-server in the cluster. Without it the HPA reports
+# `<unknown>/70%` and never scales — install it with:
+#     helm install metrics-server metrics-server/metrics-server -n kube-system
+# ------------------------------------------------------------------------------
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: auth-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/part-of: ivolve
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-service
+
+  minReplicas: 2
+  maxReplicas: 6
+
+  metrics:
+    # Target 70% of the CPU *request* (100m), i.e. scale out above ~70m average.
+    # Note this is a percentage of REQUESTS, not limits — a very common
+    # misreading that makes the target look far too low.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # ----------------------------------------------------------------------------
+  # Scaling behaviour — prevents thrashing
+  # ----------------------------------------------------------------------------
+  behavior:
+    scaleUp:
+      # React quickly to load: no stabilisation delay on the way up.
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100 # at most double
+          periodSeconds: 30
+        - type: Pods
+          value: 2 # or add 2 pods
+          periodSeconds: 30
+      # Whichever policy allows the larger increase wins.
+      selectPolicy: Max
+
+    scaleDown:
+      # Wait 5 minutes of sustained low usage before removing a pod. Without
+      # this window the HPA oscillates — scaling down, seeing load rise on the
+      # remaining pods, and scaling straight back up.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+
+---
+# ------------------------------------------------------------------------------
+# PodDisruptionBudget
+# ------------------------------------------------------------------------------
+# Constrains VOLUNTARY disruptions — node drains during an EKS upgrade,
+# `kubectl drain`, cluster-autoscaler scale-down. Without a PDB, draining a node
+# can evict every replica at once and cause an outage during routine
+# maintenance.
+#
+# It does NOT protect against involuntary disruption (node crash, OOM kill).
+# ------------------------------------------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/part-of: ivolve
+spec:
+  # At least 1 pod must stay running at all times.
+  #
+  # Using minAvailable: 1 rather than maxUnavailable: 1 is deliberate — with
+  # maxUnavailable the budget scales with replica count, so at 6 replicas the
+  # HPA could allow 5 to be evicted simultaneously.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
