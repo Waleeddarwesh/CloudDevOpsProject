@@ -1,0 +1,252 @@
+# ==============================================================================
+# Roadmap Service — Deployment, Service, HPA, PodDisruptionBudget
+# ==============================================================================
+# Java 21 / Spring Boot 3.5.4 on port 8080.
+#
+# Endpoints (from src/roadmap-service/.../RoadmapController.java):
+#   GET /api/roadmap  → a static JSON array of the eight DevOps roadmap topics
+#
+# COMPLETELY STATELESS — no database, no session, no disk. That has two
+# consequences reflected below:
+#   * it can start in parallel with everything else (no init container)
+#   * it scales purely on CPU, with no connection-pool ceiling to respect
+#
+# Note there is no /health or /actuator endpoint: the upstream pom.xml includes
+# only spring-boot-starter-web, not spring-boot-starter-actuator. The probes
+# therefore use the real API route. Adding Actuator would give proper
+# /actuator/health/liveness and /actuator/health/readiness endpoints plus
+# Prometheus metrics — see docs/MONITORING.md for that upgrade path.
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roadmap-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: roadmap-service
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    # Wave 2, same as auth-service: both are backends, and this one has no
+    # database dependency so it could equally be wave 1.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  # Longer than the other services: the JVM plus Spring context startup is slow,
+  # so a rollout legitimately takes longer before pods report Ready.
+  progressDeadlineSeconds: 400
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: roadmap-service
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: roadmap-service
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: ivolve
+    spec:
+      serviceAccountName: roadmap-service
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: roadmap-service
+
+      containers:
+        - name: roadmap-service
+          image: ivolve-roadmap-service:dev
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          env:
+            # ------------------------------------------------------------------
+            # JVM sizing inside a container
+            # ------------------------------------------------------------------
+            # MaxRAMPercentage is the critical flag. A JVM without it reads the
+            # HOST's total memory — not the cgroup limit — sizes its heap from
+            # that, grows past the 512Mi container limit, and is OOM-killed by
+            # the kernel with exit code 137. The pod then restarts, does the
+            # same thing, and CrashLoopBackOffs with nothing useful in the log.
+            #
+            # 75% of 512Mi ≈ 384Mi heap, leaving room for metaspace, thread
+            # stacks and native buffers.
+            - name: JAVA_OPTS
+              valueFrom:
+                configMapKeyRef:
+                  name: ivolve-config
+                  key: JAVA_OPTS
+
+          # --------------------------------------------------------------------
+          # Probes
+          # --------------------------------------------------------------------
+          # STARTUP: generous. A cold JVM plus Spring context initialisation
+          # takes 20-40 seconds; 40 × 5s = 200s of budget absorbs a slow node
+          # without ever tripping liveness.
+          startupProbe:
+            httpGet:
+              path: /api/roadmap
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 40
+
+          # LIVENESS: only restarts a genuinely wedged JVM — for example one
+          # stuck in a GC death spiral. Because the service is stateless with no
+          # external dependency, an HTTP check here is safe: a failure really
+          # does mean the process is broken, unlike the auth-service case where
+          # a failure might just mean the database is down.
+          livenessProbe:
+            httpGet:
+              path: /api/roadmap
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /api/roadmap
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            requests:
+              # The JVM is CPU-hungry during startup (JIT compilation) and
+              # nearly idle afterwards. A low request keeps scheduling density
+              # high; the 4× limit covers the startup burst.
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 600m
+              memory: 512Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+
+          volumeMounts:
+            # The JVM writes hsperfdata (used by jps/jstat) and Tomcat writes
+            # its work directory under /tmp. With a read-only root filesystem
+            # and no writable /tmp, Spring Boot fails to start with
+            # "Unable to create tempDir".
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
+
+      # Give Spring Boot time to run its shutdown hooks and drain in-flight
+      # requests before SIGKILL.
+      terminationGracePeriodSeconds: 45
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: roadmap-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: roadmap-service
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: ivolve
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: roadmap-service
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: roadmap-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: roadmap-service
+    app.kubernetes.io/part-of: ivolve
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: roadmap-service
+
+  minReplicas: 2
+  maxReplicas: 6
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+      selectPolicy: Max
+    scaleDown:
+      # Longer than auth-service's window. Removing a JVM pod is expensive to
+      # undo — a replacement needs 30+ seconds to become Ready — so scaling down
+      # eagerly is a bad trade.
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: roadmap-service
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: roadmap-service
+    app.kubernetes.io/part-of: ivolve
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: roadmap-service
