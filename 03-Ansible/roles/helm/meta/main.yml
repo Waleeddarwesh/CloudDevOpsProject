@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: helm
+  author: Waleed Darwesh
+  description: Installs Helm 3 and pre-registers the chart repositories used by this project.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - kubernetes
+    - helm
+
+dependencies:
+  - role: common
