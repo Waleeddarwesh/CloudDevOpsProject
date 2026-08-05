@@ -1,0 +1,115 @@
+---
+# ==============================================================================
+# Role: trivy — container image vulnerability scanner
+# ==============================================================================
+# Trivy powers the security gate in the Jenkins pipeline (Phase 5): every image
+# is scanned before it is pushed to ECR, and a CRITICAL finding fails the build.
+#
+# Installed from Aqua Security's APT repository rather than a pinned .deb URL.
+# A hardcoded release URL goes stale, and a scanner running an old engine misses
+# newly-published advisories — which defeats the point of having the gate.
+# ==============================================================================
+
+- name: Download the Trivy GPG key
+  ansible.builtin.get_url:
+    url: "{{ trivy_gpg_url }}"
+    dest: /etc/apt/keyrings/trivy.asc
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+- name: Convert the Trivy key to binary keyring format
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/trivy.gpg /etc/apt/keyrings/trivy.asc
+    creates: /etc/apt/keyrings/trivy.gpg
+
+- name: Ensure the Trivy keyring is world-readable
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/trivy.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Trivy APT repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/trivy.gpg]
+      {{ trivy_apt_url }} {{ ansible_facts['distribution_release'] }} main
+    filename: trivy
+    state: present
+    update_cache: true
+
+- name: Install Trivy
+  ansible.builtin.apt:
+    name: trivy
+    state: present
+    update_cache: true
+  register: trivy_install
+  retries: 3
+  delay: 5
+  until: trivy_install is succeeded
+
+- name: Create the Trivy cache directory
+  # Shared cache location so both the ubuntu user and the jenkins user reuse the
+  # same vulnerability database instead of each downloading their own ~600 MB copy.
+  ansible.builtin.file:
+    path: "{{ trivy_cache_dir }}"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0775"
+  failed_when: false
+
+- name: Write the Trivy configuration
+  ansible.builtin.copy:
+    dest: /etc/trivy.yaml
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/trivy) — overwritten on the next run.
+      cache:
+        dir: {{ trivy_cache_dir }}
+      # Report only issues that actually have a fix available. An unfixable
+      # CVE in a base image cannot be actioned by this pipeline, so gating on
+      # it would block every build with no path to green.
+      vulnerability:
+        ignore-unfixed: true
+      severity:
+        - HIGH
+        - CRITICAL
+      timeout: 10m
+
+- name: Download the Trivy vulnerability database
+  # Pre-warming the cache means the first pipeline run does not spend several
+  # minutes downloading the database while the build clock is ticking.
+  ansible.builtin.command:
+    cmd: trivy image --download-db-only --cache-dir {{ trivy_cache_dir }}
+    creates: "{{ trivy_cache_dir }}/db/trivy.db"
+  environment:
+    TRIVY_CACHE_DIR: "{{ trivy_cache_dir }}"
+  # A network hiccup here should not abort the whole playbook — the pipeline
+  # will download the database on first use instead.
+  failed_when: false
+  register: trivy_db
+
+- name: Schedule a nightly vulnerability database refresh
+  # New CVEs are published daily. A stale database silently passes images that
+  # would fail today, which is worse than no scan at all because it looks green.
+  ansible.builtin.cron:
+    name: "Refresh the Trivy vulnerability database"
+    minute: "30"
+    hour: "2"
+    job: "/usr/bin/trivy image --download-db-only --cache-dir {{ trivy_cache_dir }} >> /var/log/trivy-update.log 2>&1"
+    user: jenkins
+  failed_when: false
+
+- name: Verify the Trivy installation
+  ansible.builtin.command: trivy --version
+  changed_when: false
+  register: trivy_version_out
+
+- name: Report the Trivy version
+  ansible.builtin.debug:
+    msg: "{{ trivy_version_out.stdout_lines[0] | default('Trivy installed') }}"
