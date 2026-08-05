@@ -1,0 +1,9 @@
+---
+# Overridden from group_vars/all/main.yml. MUST stay within one minor version of
+# the EKS control plane set in 02-Terraform/variables.tf — Kubernetes supports
+# a ±1 minor version skew between client and server.
+kubectl_version: "1.31"
+
+# pkgs.k8s.io hosts a SEPARATE repository per minor version, so the version is
+# part of the URL rather than a package pin.
+kubectl_repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ kubectl_version }}"
