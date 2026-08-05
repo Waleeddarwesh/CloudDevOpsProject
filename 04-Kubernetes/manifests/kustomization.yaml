@@ -1,0 +1,104 @@
+# ==============================================================================
+# Kustomization — declarative manifest assembly
+# ==============================================================================
+# Kustomize is built into kubectl (`kubectl apply -k .`) and is what ArgoCD
+# detects and renders when it finds this file at the source path.
+#
+# ------------------------------------------------------------------------------
+# Why this file exists — the `images:` block
+# ------------------------------------------------------------------------------
+# The Jenkins pipeline must rewrite the image tag on every build. The naive way
+# is a regex over the YAML:
+#
+#     sed -i 's|image: .*|image: NEW_IMAGE|g' 07-frontend.yaml    # ← DANGEROUS
+#
+# That replaces EVERY image line in the file. In 05-auth-service.yaml it would
+# also rewrite the busybox init container, and in 04-database.yaml it would
+# rewrite mysql:8.0 — silently replacing the database image with an application
+# image. The failure is catastrophic and only shows up at deploy time.
+#
+# `kustomize edit set image` operates on the parsed object graph and changes
+# only the named image, wherever it appears:
+#
+#     kustomize edit set image ivolve-frontend=$ECR/ivolve-frontend:42-a1b2c3d
+#
+# It rewrites THIS file rather than the manifests, so the deployment manifests
+# stay clean and the Git diff for a release is three lines instead of a
+# whole-file churn.
+# ==============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: ivolve-application
+
+# ------------------------------------------------------------------------------
+# Resources — applied in this order
+# ------------------------------------------------------------------------------
+# Kustomize does not guarantee apply ordering by itself; the numeric filename
+# prefixes document intent, and the ArgoCD sync waves in each manifest enforce
+# it at deploy time.
+resources:
+  - 00-namespace.yaml        # Namespace, ResourceQuota, LimitRange
+  - 01-rbac.yaml             # ServiceAccounts, Roles, RoleBindings
+  - 02-config.yaml           # ConfigMap, Secret
+  - 03-storage.yaml          # StorageClass (cluster-scoped)
+  - 04-database.yaml         # Headless Service, MySQL StatefulSet, my.cnf
+  - 05-auth-service.yaml     # Deployment, Service, HPA, PDB
+  - 06-roadmap-service.yaml  # Deployment, Service, HPA, PDB
+  - 07-frontend.yaml         # Deployment, Service, NodePort, HPA, PDB
+  - 08-ingress.yaml          # ALB Ingress
+  - 09-network-policies.yaml # Pod-level firewall rules
+
+# ------------------------------------------------------------------------------
+# Namespace
+# ------------------------------------------------------------------------------
+# Forces every namespaced resource into `ivolve`, even if a manifest forgot to
+# set it. Cluster-scoped objects (the StorageClass) are correctly left alone.
+namespace: ivolve
+
+# ------------------------------------------------------------------------------
+# Images — REWRITTEN BY THE JENKINS PIPELINE
+# ------------------------------------------------------------------------------
+# `name` matches the image reference as written in the Deployment manifests
+# (e.g. `image: ivolve-frontend:dev`). Kustomize substitutes newName/newTag.
+#
+# Replace 123456789012 with your account ID, or let the pipeline do it:
+#     terraform -chdir=02-Terraform output -raw ecr_registry
+# ------------------------------------------------------------------------------
+images:
+  - name: ivolve-frontend
+    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ivolve-frontend
+    newTag: dev
+
+  - name: ivolve-auth-service
+    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ivolve-auth-service
+    newTag: dev
+
+  - name: ivolve-roadmap-service
+    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ivolve-roadmap-service
+    newTag: dev
+
+# ------------------------------------------------------------------------------
+# Common labels
+# ------------------------------------------------------------------------------
+# `labels` with includeSelectors: false — NOT the deprecated `commonLabels`.
+#
+# This distinction matters and is a real footgun: commonLabels injects labels
+# into `spec.selector` as well, and a Deployment's selector is IMMUTABLE. Adding
+# a commonLabel to an existing Deployment therefore fails with
+# "field is immutable" and the only fix is to delete and recreate the
+# Deployment — an outage caused purely by adding a label.
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/version: "1.0.0"
+
+# ------------------------------------------------------------------------------
+# Common annotations
+# ------------------------------------------------------------------------------
+commonAnnotations:
+  ivolve.io/repository: "https://github.com/WaleedDarwesh/CloudDevOpsProject"
+  ivolve.io/managed-by: "ArgoCD"
