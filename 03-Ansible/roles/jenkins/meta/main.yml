@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: jenkins
+  author: Waleed Darwesh
+  description: Installs the Jenkins LTS controller with declarative plugin provisioning, JVM tuning and a systemd drop-in override.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - jenkins
+    - ci
+
+dependencies:
+  # The Jenkins package declares no JRE dependency — without a JVM the service
+  # installs cleanly and then refuses to start.
+  - role: java
+  # The `docker` group must exist before the jenkins user is added to it.
+  - role: docker
