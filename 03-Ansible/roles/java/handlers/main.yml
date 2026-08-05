@@ -1,0 +1,3 @@
+---
+# No handlers required — installing a JDK changes no running service.
+# The file exists so the role structure stays uniform across all roles.
