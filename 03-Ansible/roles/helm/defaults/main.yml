@@ -1,0 +1,28 @@
+---
+helm_apt_url: https://baltocdn.com/helm/stable/debian/
+helm_gpg_url: https://baltocdn.com/helm/signing.asc
+
+helm_apt_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+
+# Chart repositories pre-registered so the operator does not have to look each
+# one up during installation.
+helm_repositories:
+  # AWS Load Balancer Controller — turns the Ingress in Phase 4 into a real ALB.
+  - name: eks
+    url: https://aws.github.io/eks-charts
+
+  # kube-prometheus-stack — Prometheus, Grafana, Alertmanager, node-exporter
+  # and kube-state-metrics in one chart (Phase 7).
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
+
+  # ArgoCD (Phase 6).
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+
+  # Metrics Server — supplies the CPU/memory metrics the HorizontalPodAutoscaler
+  # reads. Without it the HPA reports <unknown>/70% and never scales.
+  - name: metrics-server
+    url: https://kubernetes-sigs.github.io/metrics-server/

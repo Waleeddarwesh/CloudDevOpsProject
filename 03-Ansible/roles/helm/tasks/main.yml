@@ -1,0 +1,88 @@
+---
+# ==============================================================================
+# Role: helm — Kubernetes package manager
+# ==============================================================================
+# Needed to install the cluster components that are NOT part of this
+# repository's manifests:
+#
+#   * AWS Load Balancer Controller — without it the Ingress in Phase 4 is inert
+#     and no ALB is ever created
+#   * kube-prometheus-stack        — the monitoring stack in Phase 7
+#   * ArgoCD                       — the GitOps controller in Phase 6
+# ==============================================================================
+
+- name: Download the Helm APT signing key
+  ansible.builtin.get_url:
+    url: "{{ helm_gpg_url }}"
+    dest: /etc/apt/keyrings/helm.asc
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+- name: Convert the Helm key to binary keyring format
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/helm.gpg /etc/apt/keyrings/helm.asc
+    creates: /etc/apt/keyrings/helm.gpg
+
+- name: Ensure the Helm keyring is world-readable
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/helm.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Helm APT repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ helm_apt_arch_map[ansible_facts['architecture']] }}
+      signed-by=/etc/apt/keyrings/helm.gpg]
+      {{ helm_apt_url }} all main
+    filename: helm
+    state: present
+    update_cache: true
+
+- name: Install Helm
+  ansible.builtin.apt:
+    name: helm
+    state: present
+    update_cache: true
+  register: helm_install
+  retries: 3
+  delay: 5
+  until: helm_install is succeeded
+
+- name: Add the Helm chart repositories
+  # Registered for the jenkins user, which is the identity that runs deployments
+  # from the pipeline. Helm stores repository config per-user in
+  # ~/.config/helm/repositories.yaml, so adding them as root would not help.
+  ansible.builtin.command:
+    cmd: "helm repo add {{ item.name }} {{ item.url }} --force-update"
+  become: true
+  become_user: jenkins
+  loop: "{{ helm_repositories }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+  failed_when: false
+
+- name: Update the Helm repository index
+  ansible.builtin.command: helm repo update
+  become: true
+  become_user: jenkins
+  changed_when: false
+  failed_when: false
+
+- name: Install the Helm bash completion
+  ansible.builtin.shell:
+    cmd: helm completion bash > /etc/bash_completion.d/helm
+    creates: /etc/bash_completion.d/helm
+
+- name: Verify the Helm installation
+  ansible.builtin.command: helm version --short
+  changed_when: false
+  register: helm_version_out
+
+- name: Report the Helm version
+  ansible.builtin.debug:
+    msg: "Helm {{ helm_version_out.stdout | default('installed') }}"
