@@ -1,0 +1,135 @@
+---
+# ==============================================================================
+# Role: sonarqube — static code analysis server
+# ==============================================================================
+# SonarQube inspects the source of all three microservices for bugs, code
+# smells, duplication and security hotspots, and exposes a QUALITY GATE that the
+# Jenkins pipeline blocks on.
+#
+# This complements Trivy rather than duplicating it:
+#     Trivy      scans the built IMAGE  → known CVEs in OS and library packages
+#     SonarQube  scans the SOURCE       → defects in code you wrote yourself
+#
+# Deployed as containers via Docker Compose rather than a native package:
+#   * SonarQube bundles a specific Elasticsearch build; a native install fights
+#     with any system-wide JVM or ES.
+#   * Upgrading is an image tag change instead of a migration.
+#   * It is trivially removable — this is a support tool, not the product.
+# ==============================================================================
+
+- name: Ensure vm.max_map_count is high enough for Elasticsearch
+  # SonarQube embeds Elasticsearch, which refuses to start below 262144 and
+  # fails a bootstrap check with:
+  #   "max virtual memory areas vm.max_map_count [65530] is too low"
+  # The common role already sets this; it is asserted again here so the role
+  # remains correct when run standalone with --tags sonarqube.
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: "262144"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-ivolve.conf
+    reload: true
+
+- name: Create the SonarQube directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    # uid 1000 is the `sonarqube` user inside the official image. The bind-mounted
+    # host directories must be writable by that uid or the container exits
+    # immediately with a permission error on its data directory.
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+  loop:
+    - "{{ sonarqube_data_dir }}"
+    - "{{ sonarqube_data_dir }}/data"        # the embedded Elasticsearch index
+    - "{{ sonarqube_data_dir }}/extensions"  # plugins and language analysers
+    - "{{ sonarqube_data_dir }}/logs"
+
+- name: Create the PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ sonarqube_data_dir }}/postgresql"
+    state: directory
+    owner: "999"    # the `postgres` user inside the postgres image
+    group: "999"
+    mode: "0700"    # PostgreSQL refuses to start if its data dir is group-readable
+
+- name: Render the SonarQube Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ sonarqube_data_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart sonarqube
+
+- name: Render the SonarQube environment file
+  # Secrets live here rather than in the Compose file so the file mode can be
+  # 0600. They come from the Ansible Vault (group_vars/all/vault.yml).
+  ansible.builtin.template:
+    src: sonarqube.env.j2
+    dest: "{{ sonarqube_data_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  # Prevents the rendered passwords from being echoed into the Ansible log.
+  no_log: true
+  notify: Restart sonarqube
+
+- name: Start the SonarQube stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ sonarqube_data_dir }}"
+    state: present
+    # Recreate containers when the Compose file or env changes.
+    recreate: auto
+    # Wait for the containers' healthchecks to pass before continuing.
+    wait: true
+    wait_timeout: 300
+  register: sonarqube_compose
+
+- name: Wait for the SonarQube web interface
+  # SonarQube takes 2-4 minutes on first boot: it initialises the database
+  # schema and builds the Elasticsearch index before serving traffic.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ sonarqube_port }}/api/system/status"
+    return_content: true
+    timeout: 10
+  register: sonar_status
+  retries: 40
+  delay: 15
+  # SonarQube reports STARTING → DB_MIGRATION_RUNNING → UP. Only UP means it is
+  # ready to accept an analysis submission.
+  until: sonar_status.status == 200 and (sonar_status.content | from_json).status == 'UP'
+  failed_when: false
+
+- name: Change the default admin password
+  # SonarQube ships with admin/admin. On a server whose port 9000 is reachable,
+  # those credentials expose the full source of every analysed project and allow
+  # an attacker to disable the quality gate. Changing it is not optional.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ sonarqube_port }}/api/users/change_password"
+    method: POST
+    user: admin
+    password: admin
+    force_basic_auth: true
+    body_format: form-urlencoded
+    body:
+      login: admin
+      previousPassword: admin
+      password: "{{ sonarqube_admin_password }}"
+    # 204 = changed. 401 = the default password no longer works, which means it
+    # was already changed on a previous run — the desired state either way.
+    status_code: [204, 401]
+  no_log: true
+  # Only attempt this once the service actually came up.
+  when: sonar_status.status is defined and sonar_status.status == 200
+  register: sonar_password_change
+  failed_when: false
+
+- name: Report the SonarQube status
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'SonarQube is UP at http://' ~ ansible_host ~ ':' ~ sonarqube_port
+         if (sonar_status.status | default(0)) == 200
+         else 'SonarQube did not report UP within the timeout — check: docker compose -f '
+              ~ sonarqube_data_dir ~ '/docker-compose.yml logs sonarqube' }}
