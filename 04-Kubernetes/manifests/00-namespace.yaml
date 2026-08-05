@@ -1,0 +1,130 @@
+# ==============================================================================
+# Namespace, ResourceQuota and LimitRange
+# ==============================================================================
+# The namespace is the unit of isolation, and the two governance objects here
+# are what stop one workload from starving the cluster.
+#
+#   ResourceQuota  a HARD CEILING on the namespace as a whole. Requests that
+#                  would exceed it are rejected at admission time.
+#   LimitRange     DEFAULTS and per-container bounds. Applied automatically to
+#                  any container that does not declare its own.
+#
+# The two work together: a ResourceQuota that constrains CPU/memory makes every
+# pod's requests MANDATORY, so a pod with no resources block is rejected with
+# "must specify limits.cpu". The LimitRange supplies those defaults, which is
+# why a namespace with a quota and no LimitRange is a common source of
+# mysteriously unschedulable pods.
+# ==============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ivolve
+  labels:
+    name: ivolve
+    app.kubernetes.io/part-of: ivolve-platform
+    environment: dev
+    # Enforces the "restricted" Pod Security Standard — the strictest built-in
+    # profile. It rejects privileged containers, host namespace sharing,
+    # privilege escalation, and any container not running as non-root.
+    #
+    # `enforce` blocks violations outright; `audit` and `warn` additionally
+    # record and surface them. Every workload in this project is written to
+    # comply, which is why the securityContext blocks below are not optional
+    # decoration — without them, the pods would be refused admission.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# ------------------------------------------------------------------------------
+# ResourceQuota — namespace-wide ceiling
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ivolve-quota
+  namespace: ivolve
+spec:
+  hard:
+    # --- Compute ---
+    # requests.* is what the SCHEDULER reserves; the sum of all pod requests
+    # cannot exceed this.
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    # limits.* is the burst ceiling. Set higher than requests so pods can absorb
+    # short spikes, but bounded so a runaway container cannot consume the node.
+    limits.cpu: "8"
+    limits.memory: 16Gi
+
+    # --- Object counts ---
+    # Caps the blast radius of a runaway controller or a misconfigured HPA that
+    # would otherwise create pods until the cluster fills.
+    pods: "30"
+    services: "10"
+    # Only ONE LoadBalancer is permitted. Each one provisions a real AWS NLB/ALB
+    # that bills hourly whether or not it receives traffic — this is a genuine
+    # cost guardrail, not a theoretical one.
+    services.loadbalancers: "1"
+    services.nodeports: "3"
+
+    # --- Storage ---
+    persistentvolumeclaims: "5"
+    requests.storage: 50Gi
+
+    # --- Configuration ---
+    configmaps: "15"
+    secrets: "15"
+
+---
+# ------------------------------------------------------------------------------
+# LimitRange — per-container defaults and bounds
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ivolve-limits
+  namespace: ivolve
+spec:
+  limits:
+    - type: Container
+
+      # Applied as `limits` when a container specifies none.
+      default:
+        cpu: 500m
+        memory: 512Mi
+
+      # Applied as `requests` when a container specifies none.
+      #
+      # Note requests are set BELOW limits on purpose. Requests are the
+      # guaranteed reservation used for scheduling; limits are the burst
+      # ceiling. Setting them equal gives Guaranteed QoS (best for the database)
+      # but wastes reserved capacity for bursty web workloads.
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+
+      # Nothing in this namespace may request more than this.
+      max:
+        cpu: "2"
+        memory: 4Gi
+
+      # Rejects a container requesting an absurdly small amount — 1m CPU makes a
+      # pod schedulable anywhere and then throttled into uselessness.
+      min:
+        cpu: 10m
+        memory: 32Mi
+
+      # limit / request may not exceed 4×. This bounds overcommit: without it, a
+      # pod could request 128Mi and burst to 4Gi, so the scheduler packs nodes
+      # based on a fiction and the kernel OOM-kills under real load.
+      maxLimitRequestRatio:
+        cpu: "10"
+        memory: "4"
+
+    - type: PersistentVolumeClaim
+      max:
+        storage: 20Gi
+      min:
+        storage: 1Gi
