@@ -1,0 +1,20 @@
+---
+# ==============================================================================
+# Role: common — handlers
+# ==============================================================================
+# A handler runs only when a task notifies it, and only ONCE per play no matter
+# how many tasks notified it. That is exactly what service restarts need: change
+# five config files, restart the service once, and restart nothing at all when
+# nothing changed.
+# ==============================================================================
+
+- name: Restart cron
+  # Picks up the new timezone so scheduled jobs fire at the intended local time.
+  ansible.builtin.systemd:
+    name: cron
+    state: restarted
+
+- name: Restart journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted

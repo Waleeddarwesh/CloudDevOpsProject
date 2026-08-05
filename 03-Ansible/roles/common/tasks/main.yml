@@ -1,0 +1,104 @@
+---
+# ==============================================================================
+# Role: common — baseline configuration applied to every host
+# ==============================================================================
+# Everything here is a prerequisite for the roles that follow: the APT keyring
+# directory, HTTPS transport for APT, and the timezone that build timestamps
+# are recorded in.
+# ==============================================================================
+
+- name: Update the APT cache
+  ansible.builtin.apt:
+    update_cache: true
+    # Only refresh if the cache is older than an hour. Without this, every role
+    # that runs apt triggers a full index download, adding minutes to the run
+    # for no benefit.
+    cache_valid_time: 3600
+  # Ansible cannot detect a "change" in a cache refresh, so it would otherwise
+  # report changed=1 on every single run and break idempotency reporting.
+  changed_when: false
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+  # APT occasionally fails on a transient mirror error; three attempts with a
+  # short pause turns a spurious failure into a brief delay.
+  register: apt_result
+  retries: 3
+  delay: 5
+  until: apt_result is succeeded
+
+- name: Create the APT keyring directory
+  # Modern APT reads signing keys from /etc/apt/keyrings, with each repository
+  # pinned to its own key via `signed-by=`. The old approach — apt-key add,
+  # writing to a single shared trusted.gpg — meant ANY trusted key could sign
+  # ANY repository, so one compromised third-party key could serve malicious
+  # replacements for core system packages. apt-key is deprecated and removed in
+  # newer releases.
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Set the system timezone
+  # Jenkins build timestamps, Docker logs and CloudWatch entries are correlated
+  # during an incident. Hosts on different timezones make that needlessly hard.
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+  notify: Restart cron
+
+- name: Configure kernel parameters
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-ivolve.conf
+    reload: true
+  loop: "{{ common_sysctl_settings }}"
+  loop_control:
+    label: "{{ item.name }} = {{ item.value }}"
+
+- name: Configure journald log retention
+  # systemd-journald defaults to consuming up to 10% of the filesystem. On a
+  # build server producing verbose container logs that fills the disk, and a
+  # full disk stops Jenkins mid-build with errors that point nowhere near the
+  # real cause.
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: "^#?SystemMaxUse="
+    line: "SystemMaxUse={{ common_journald_max_use }}"
+    state: present
+  notify: Restart journald
+
+- name: Enable and start the time synchronisation service
+  # Clock drift breaks AWS SigV4 request signing — an instance more than five
+  # minutes out of sync gets SignatureDoesNotMatch on every AWS API call,
+  # including `docker push` to ECR.
+  ansible.builtin.systemd:
+    name: systemd-timesyncd
+    state: started
+    enabled: true
+
+- name: Configure unattended security upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+
+- name: Apply the unattended-upgrades policy
+  # Security patches only, and never an automatic reboot — an unplanned reboot
+  # in the middle of a build loses the workspace and fails the job.
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/51ivolve-unattended
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Managed by Ansible — do not edit by hand.
+      Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}-security";
+      };
+      Unattended-Upgrade::Automatic-Reboot "false";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
