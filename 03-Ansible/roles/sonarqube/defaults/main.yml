@@ -1,0 +1,29 @@
+---
+sonarqube_port: 9000
+
+# LTS Community edition — the supported long-term release line, free tier.
+sonarqube_image: sonarqube:lts-community
+
+sonarqube_data_dir: /opt/sonarqube
+
+# --- Database ---
+sonarqube_db_user: sonar
+sonarqube_db_name: sonarqube
+
+# --- JVM heap sizes ---
+# SonarQube runs three JVMs (web, compute engine, search). The stock defaults
+# assume a dedicated host; these are sized to coexist with Jenkins on a
+# t3.medium (4 GiB total).
+sonarqube_web_heap: "512m"
+sonarqube_ce_heap: "512m"
+sonarqube_search_heap: "512m"
+
+# ------------------------------------------------------------------------------
+# Secrets — indirected through Ansible Vault
+# ------------------------------------------------------------------------------
+# The `vault_`-prefixed variables live in the encrypted
+# group_vars/all/vault.yml. The `| default(...)` fallbacks exist ONLY so that
+# `--check` and syntax checks run without a vault present; a real run must
+# supply them, and the defaults below are intentionally obvious placeholders.
+sonarqube_admin_password: "{{ vault_sonarqube_admin_password | default('CHANGE_ME_admin') }}"
+sonarqube_db_password: "{{ vault_sonarqube_db_password | default('CHANGE_ME_db') }}"

@@ -1,0 +1,20 @@
+---
+galaxy_info:
+  role_name: sonarqube
+  author: Waleed Darwesh
+  description: Deploys SonarQube Community LTS with a PostgreSQL backend via Docker Compose, and rotates the default admin password.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - sonarqube
+    - quality
+    - sast
+
+dependencies:
+  # Needs the Docker daemon, the Compose v2 plugin and the Python Docker SDK.
+  - role: docker
