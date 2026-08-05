@@ -1,0 +1,197 @@
+---
+# ==============================================================================
+# Jenkins CI Server — Configuration Playbook
+# ==============================================================================
+# Takes the bare Ubuntu 22.04 instance Terraform provisioned and turns it into a
+# fully-equipped CI server.
+#
+# Run with:
+#     ansible-playbook playbook.yml
+#
+# Useful variations:
+#     ansible-playbook playbook.yml --check --diff   # dry run, show changes
+#     ansible-playbook playbook.yml --tags docker    # only the docker role
+#     ansible-playbook playbook.yml --skip-tags sonarqube
+#     ansible-playbook playbook.yml -vvv             # debug connection issues
+#
+# The playbook is IDEMPOTENT: running it ten times produces the same result as
+# running it once, and the second run should report `changed=0`. That property
+# is what makes it safe to re-run to add a tool or repair configuration drift.
+# ==============================================================================
+
+- name: Configure Jenkins CI server
+  # Group created by the aws_ec2 dynamic inventory plugin from the EC2 tag
+  # Role=jenkins. No IP address appears anywhere in this repository.
+  hosts: role_jenkins
+
+  become: true
+
+  # Fail fast if any host in the batch errors, rather than continuing and
+  # leaving a half-configured server.
+  any_errors_fatal: true
+
+  # ----------------------------------------------------------------------------
+  # Pre-flight checks
+  # ----------------------------------------------------------------------------
+  pre_tasks:
+    - name: Wait for the instance to accept SSH connections
+      # Terraform returns as soon as the EC2 API reports "running", which is
+      # well before sshd is listening. Without this the first task fails with
+      # "Failed to connect to the host via ssh" on a freshly created instance.
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 300
+      tags: [always]
+
+    - name: Gather facts
+      # Facts are collected explicitly after the connection is confirmed, rather
+      # than by the implicit Gathering Facts step, so a slow boot cannot fail
+      # the play before wait_for_connection has had a chance to run.
+      ansible.builtin.setup:
+      tags: [always]
+
+    - name: Verify the target is Ubuntu 22.04
+      # Every role below uses APT and the Ubuntu "jammy" repository codename.
+      # Running against Amazon Linux or RHEL would fail deep inside a role with
+      # a confusing error; failing here states the reason plainly.
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_major_version'] is version('22', '>=')
+        fail_msg: >-
+          This playbook targets Ubuntu 22.04+, but found
+          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+        success_msg: "Target OS verified: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+      tags: [always]
+
+    - name: Wait for the Terraform user_data bootstrap to finish
+      # user_data and Ansible both call apt-get. If they overlap, one of them
+      # dies on "Could not get lock /var/lib/dpkg/lock-frontend" — an
+      # intermittent failure that is painful to diagnose. The marker file is
+      # written by the bootstrap script as its final action.
+      ansible.builtin.wait_for:
+        path: /etc/ivolve-bootstrap-complete
+        timeout: 600
+        sleep: 5
+      tags: [always]
+
+    - name: Confirm sufficient free disk space
+      # Docker images, the Maven cache and the Trivy database together need
+      # well over 10 GB. Discovering this mid-build is far worse than failing
+      # here with a clear message.
+      ansible.builtin.assert:
+        that:
+          - (ansible_facts['mounts'] | selectattr('mount', 'equalto', '/') | first).size_available > 10737418240
+        fail_msg: "Less than 10 GB free on /. Increase jenkins_root_volume_size in Terraform."
+      tags: [always]
+
+  # ----------------------------------------------------------------------------
+  # Roles — applied in dependency order
+  # ----------------------------------------------------------------------------
+  roles:
+    # Base packages, timezone, and hardening applied to every host.
+    - role: common
+      tags: [common, base]
+
+    # Java 17 — the JVM Jenkins itself runs on. MUST come before the jenkins
+    # role: the Jenkins package declares no JRE dependency of its own, so
+    # installing it without a JVM present produces a service that fails to start
+    # with a bare "Failed with result 'exit-code'".
+    - role: java
+      tags: [java, jenkins]
+
+    # Docker Engine + Compose plugin. MUST come before jenkins so the `docker`
+    # group already exists when the jenkins user is added to it.
+    - role: docker
+      tags: [docker]
+
+    # Jenkins controller: repository, package, plugins, systemd unit.
+    - role: jenkins
+      tags: [jenkins, ci]
+
+    # Trivy — container image vulnerability scanner used by the pipeline's
+    # security gate.
+    - role: trivy
+      tags: [trivy, security]
+
+    # AWS CLI v2 — ECR login and `aws eks update-kubeconfig`.
+    - role: aws_cli
+      tags: [aws, cli]
+
+    # kubectl — rollout verification from the pipeline.
+    - role: kubectl
+      tags: [kubectl, k8s]
+
+    # Helm — installs the AWS Load Balancer Controller and the monitoring stack.
+    - role: helm
+      tags: [helm, k8s]
+
+    # SonarQube, containerised. Optional: skip with --skip-tags sonarqube.
+    - role: sonarqube
+      tags: [sonarqube, quality]
+      when: sonarqube_enabled | default(true)
+
+  # ----------------------------------------------------------------------------
+  # Post-run verification and summary
+  # ----------------------------------------------------------------------------
+  post_tasks:
+    - name: Collect installed tool versions
+      # changed_when: false marks these as read-only checks so they never
+      # inflate the `changed` count and break idempotency reporting.
+      ansible.builtin.command: "{{ item.cmd }}"
+      changed_when: false
+      failed_when: false
+      register: tool_versions
+      loop:
+        - { name: "Java", cmd: "java -version" }
+        - { name: "Jenkins", cmd: "systemctl is-active jenkins" }
+        - { name: "Docker", cmd: "docker --version" }
+        - { name: "Trivy", cmd: "trivy --version" }
+        - { name: "AWS CLI", cmd: "aws --version" }
+        - { name: "kubectl", cmd: "kubectl version --client" }
+        - { name: "Helm", cmd: "helm version --short" }
+      loop_control:
+        label: "{{ item.name }}"
+      tags: [always, verify]
+
+    - name: Read the Jenkins initial admin password
+      # Jenkins writes this file on first boot and deletes it once the setup
+      # wizard completes, so a missing file simply means setup is already done.
+      ansible.builtin.slurp:
+        src: /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_initial_password
+      failed_when: false
+      tags: [always, verify]
+
+    - name: Display the setup summary
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════════
+           Jenkins CI server is ready
+          ══════════════════════════════════════════════════════════════════
+
+           Jenkins UI    http://{{ ansible_host }}:8080
+           SonarQube     http://{{ ansible_host }}:9000   (admin / admin)
+           SSH           ssh -i ~/.ssh/ivolve-key.pem ubuntu@{{ ansible_host }}
+
+           Initial admin password:
+           {{ (jenkins_initial_password.content | b64decode | trim)
+              if jenkins_initial_password.content is defined
+              else 'already consumed — the setup wizard has been completed' }}
+
+          ══════════════════════════════════════════════════════════════════
+           Next steps
+          ══════════════════════════════════════════════════════════════════
+           1. Unlock Jenkins with the password above.
+           2. Install the suggested plugins, then create the admin user.
+           3. Manage Jenkins → System → Global Pipeline Libraries
+                Name           : shared-library
+                Default version: main
+                Retrieval      : Modern SCM → Git
+                Repository     : {{ shared_library_repo | default('https://github.com/Waleeddarwesh/jenkins-shared-library.git') }}
+           4. Manage Jenkins → Credentials, add:
+                github-token    (Username with password — a GitHub PAT)
+                sonar-token     (Secret text — generated in the SonarQube UI)
+           5. Create three Pipeline jobs pointing at 05-Jenkins/Jenkinsfiles/.
+          ══════════════════════════════════════════════════════════════════
+      tags: [always, verify]
