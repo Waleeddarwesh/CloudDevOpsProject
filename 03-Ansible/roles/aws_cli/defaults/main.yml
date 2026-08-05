@@ -1,0 +1,11 @@
+---
+# AWS publishes one "latest" URL per architecture; there is no versioned APT
+# repository for CLI v2.
+aws_cli_download_urls:
+  x86_64: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+  aarch64: https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip
+
+aws_cli_download_url: "{{ aws_cli_download_urls[ansible_facts['architecture']] }}"
+
+# Overridden from group_vars/all/main.yml.
+aws_region: us-east-1
