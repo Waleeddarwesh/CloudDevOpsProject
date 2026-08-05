@@ -1,0 +1,428 @@
+# ==============================================================================
+# MySQL — Headless Service + StatefulSet
+# ==============================================================================
+# The database is the one component in this project that is STATEFUL, and that
+# single fact drives every choice below.
+#
+# ------------------------------------------------------------------------------
+# Why StatefulSet and not Deployment?
+# ------------------------------------------------------------------------------
+#   Deployment                        StatefulSet
+#   ─────────────────────────────     ─────────────────────────────────────────
+#   Random pod names                  Ordinal, stable names: mysql-0, mysql-1
+#   (mysql-7d4b9c-x8k2p)
+#   New identity on every restart     mysql-0 is ALWAYS mysql-0
+#   All replicas share one PVC        Each replica gets its OWN PVC, and keeps
+#   (or fight over it)                it across rescheduling
+#   Pods start/stop in parallel       Ordered, one at a time
+#   No stable network identity        Stable DNS per pod via a headless Service
+#
+# A database needs a stable identity because its data is on disk and that disk
+# must follow it. Running MySQL under a Deployment with a shared ReadWriteOnce
+# PVC produces two pods fighting over one volume and a corrupted data directory.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Headless Service
+# ------------------------------------------------------------------------------
+# `clusterIP: None` is what makes this headless — and it changes DNS behaviour
+# fundamentally:
+#
+#   Normal Service    mysql → 10.100.x.x   (one virtual IP, kube-proxy
+#                                           load-balances to a random pod)
+#   Headless Service  mysql → 10.0.10.42   (the pod IPs themselves, directly)
+#
+# It also creates a per-pod DNS record:
+#
+#   mysql-0.mysql.ivolve.svc.cluster.local  →  the IP of pod mysql-0
+#   └────┬─┘ └─┬─┘ └──┬─┘
+#     pod   service  namespace
+#
+# That name is what 02-config.yaml sets as DB_HOST. Load balancing across
+# database replicas would be wrong — writes must reach a specific instance —
+# so addressing the pod directly is the point.
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ivolve
+spec:
+  clusterIP: None
+  # Give each pod a DNS record as soon as it exists, without waiting for its
+  # readiness probe to pass. Required for clustered databases whose members
+  # discover each other during startup — they are not Ready until they have
+  # found their peers, which is a deadlock if DNS waits for readiness.
+  publishNotReadyAddresses: true
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: mysql
+
+---
+# ------------------------------------------------------------------------------
+# StatefulSet
+# ------------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    # ArgoCD sync wave. Lower numbers are applied and allowed to become healthy
+    # FIRST. The database is wave 1 so it is running before auth-service (wave
+    # 2) starts and tries to connect. See 06-ArgoCD/.
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  # Binds this StatefulSet to the headless Service above. This is what generates
+  # the mysql-0.mysql DNS record — without it, per-pod DNS does not exist.
+  serviceName: mysql
+
+  # ONE replica. MySQL does not replicate by simply raising this number: a
+  # second pod would start as an independent, empty database, not a replica.
+  # Real HA needs an operator (Vitess, Percona XtraDB, or MySQL Group
+  # Replication with a bootstrap sidecar). Scaling this to 2 silently produces
+  # a split-brain, so it is deliberately left at 1.
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mysql
+
+  # OrderedReady starts pods 0,1,2… waiting for each to be Ready, and terminates
+  # in reverse. Correct for a database, where an unordered restart risks a
+  # replica coming up before its primary.
+  podManagementPolicy: OrderedReady
+
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Update every pod with an ordinal >= 0, i.e. all of them.
+      partition: 0
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mysql
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: ivolve
+      annotations:
+        # Roll the pod automatically when the Secret changes. Kubernetes does
+        # NOT restart pods when a referenced Secret is updated, so without a
+        # trigger like this the database keeps running with the old password
+        # while the application picks up the new one.
+        # Kustomize rewrites this hash when configured with a secretGenerator.
+        checksum/secret: "replace-me-on-secret-change"
+    spec:
+      serviceAccountName: mysql
+      automountServiceAccountToken: false
+
+      # ------------------------------------------------------------------------
+      # Pod-level security context
+      # ------------------------------------------------------------------------
+      # Required by the `restricted` Pod Security Standard enforced on the
+      # namespace (see 00-namespace.yaml). Without these the pod is REJECTED at
+      # admission — this is not optional hardening.
+      securityContext:
+        runAsNonRoot: true
+        # uid/gid 999 is the `mysql` user inside the official image.
+        runAsUser: 999
+        runAsGroup: 999
+        # fsGroup makes the kubelet chown the mounted EBS volume to this group
+        # before the container starts. Without it, a freshly provisioned volume
+        # is owned by root and MySQL — running as uid 999 — cannot write to its
+        # own data directory, crash-looping with "Permission denied".
+        fsGroup: 999
+        # Only apply the chown when ownership is actually wrong. On a large
+        # volume the recursive chown otherwise runs on every restart and can add
+        # minutes to startup.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+
+      # ------------------------------------------------------------------------
+      # Scheduling — taints and tolerations
+      # ------------------------------------------------------------------------
+      # A taint REPELS pods from a node; a toleration lets a specific pod ignore
+      # that repulsion. Together they reserve nodes for particular workloads.
+      #
+      # This toleration is inert unless you actually taint a node:
+      #     kubectl taint nodes <node> workload=database:NoSchedule
+      #
+      # After that, ONLY pods carrying this toleration can schedule there, so
+      # the database gets a node to itself and a noisy build pod cannot compete
+      # with it for page cache and disk IO.
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: database
+          effect: NoSchedule
+
+      affinity:
+        nodeAffinity:
+          # "Preferred" rather than "required": if no node carries the
+          # workload=database label, the pod still schedules somewhere instead
+          # of sitting Pending forever. Required affinity on a 2-node cluster is
+          # a common way to deadlock yourself.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: workload
+                    operator: In
+                    values: ["database"]
+
+      # Give MySQL time to flush its buffer pool and close cleanly. The default
+      # is 30s; a SIGKILL mid-flush is how InnoDB tables get corrupted.
+      terminationGracePeriodSeconds: 120
+
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: mysql
+              containerPort: 3306
+              protocol: TCP
+
+          # --------------------------------------------------------------------
+          # Environment
+          # --------------------------------------------------------------------
+          # Every value is injected by reference — nothing is hardcoded here.
+          # Non-sensitive values come from the ConfigMap, credentials from the
+          # Secret.
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ivolve-secret
+                  key: MYSQL_ROOT_PASSWORD
+
+            # MySQL creates this database on first boot if the data directory is
+            # empty. auth-service then creates the `users` table inside it.
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: ivolve-config
+                  key: MYSQL_DATABASE
+
+            # Least-privilege application account, granted rights on
+            # MYSQL_DATABASE only.
+            - name: MYSQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: ivolve-config
+                  key: MYSQL_USER
+
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ivolve-secret
+                  key: MYSQL_PASSWORD
+
+          # --------------------------------------------------------------------
+          # Probes
+          # --------------------------------------------------------------------
+          # The three probes answer three different questions, and conflating
+          # them is one of the most common Kubernetes mistakes.
+
+          # STARTUP — "has it finished booting?"
+          # Suppresses the liveness and readiness probes entirely until it
+          # passes. MySQL's first boot initialises the data directory and can
+          # take well over a minute; without a startup probe, the liveness probe
+          # fires during that window, declares the container dead, and restarts
+          # it — forever, never completing initialisation.
+          # Budget here: 30 × 10s = 300 seconds.
+          startupProbe:
+            exec:
+              command:
+                - bash
+                - -ec
+                - 'mysqladmin ping -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}"'
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+
+          # LIVENESS — "is it wedged and in need of a restart?"
+          # Deliberately conservative: failureThreshold 5 means five consecutive
+          # failures over 50 seconds before a restart. An aggressive liveness
+          # probe on a database that is merely busy will restart it mid-query
+          # and turn a slowdown into an outage.
+          livenessProbe:
+            exec:
+              command:
+                - bash
+                - -ec
+                - 'mysqladmin ping -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}"'
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          # READINESS — "should it receive traffic right now?"
+          # Runs a real query rather than a ping, because mysqladmin ping
+          # succeeds while the server is still replaying the redo log and
+          # rejecting connections. Failing readiness removes the pod from
+          # Service endpoints WITHOUT restarting it.
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -ec
+                - 'mysql -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1"'
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # --------------------------------------------------------------------
+          # Resources
+          # --------------------------------------------------------------------
+          # requests == limits gives this pod GUARANTEED Quality of Service —
+          # the highest class. Under node memory pressure the kubelet evicts
+          # BestEffort pods first, then Burstable, and Guaranteed last. For the
+          # one component holding persistent state, that ordering matters.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+
+          # --------------------------------------------------------------------
+          # Container security context
+          # --------------------------------------------------------------------
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              # Drop every Linux capability. MySQL binds port 3306, which is
+              # above 1024 and therefore needs no NET_BIND_SERVICE.
+              drop: ["ALL"]
+            # NOT read-only: mysqld writes its socket to /var/run/mysqld and
+            # temporary tables to /tmp. Both could be redirected to emptyDir
+            # volumes, but the extra complexity buys little for a container that
+            # has already dropped all capabilities and runs as non-root.
+            readOnlyRootFilesystem: false
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+              # Store the data directory in a SUBDIRECTORY of the volume rather
+              # than at its root. A freshly formatted ext4 volume contains a
+              # lost+found directory, and MySQL refuses to initialise into a
+              # non-empty directory — failing with "Data directory has files in
+              # it" on a volume that looks empty.
+              subPath: mysql
+
+            - name: config
+              mountPath: /etc/mysql/conf.d
+              readOnly: true
+
+      volumes:
+        - name: config
+          configMap:
+            name: mysql-config
+
+  # ----------------------------------------------------------------------------
+  # volumeClaimTemplates — the defining feature of a StatefulSet
+  # ----------------------------------------------------------------------------
+  # Each replica gets its OWN PersistentVolumeClaim, named <template>-<pod>:
+  #     data-mysql-0
+  #
+  # That PVC is NOT deleted when the pod is deleted, and is re-attached when the
+  # pod is recreated — which is exactly what makes the data durable across
+  # rescheduling, node failure and image upgrades.
+  #
+  # WARNING: this section is IMMUTABLE. Changing the storage size or class here
+  # is rejected on an existing StatefulSet; the documented path is to delete the
+  # StatefulSet with --cascade=orphan and recreate it.
+  # ----------------------------------------------------------------------------
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: mysql
+          app.kubernetes.io/part-of: ivolve
+      spec:
+        # ReadWriteOnce — mountable by a single node at a time. This is the only
+        # mode EBS supports, and it is correct here: two MySQL processes writing
+        # one data directory would corrupt it.
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ivolve-storage
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+# ------------------------------------------------------------------------------
+# MySQL server configuration
+# ------------------------------------------------------------------------------
+# Mounted at /etc/mysql/conf.d, which the official image includes from its main
+# my.cnf. Supplying a file here is far cleaner than passing a long list of
+# --flags through the container command.
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/part-of: ivolve
+data:
+  ivolve.cnf: |
+    [mysqld]
+    # --- Character set ---
+    # utf8mb4 is real, full UTF-8 including emoji. MySQL's legacy "utf8" is a
+    # 3-byte subset that silently truncates 4-byte characters.
+    character-set-server = utf8mb4
+    collation-server     = utf8mb4_unicode_ci
+
+    # --- Memory ---
+    # The InnoDB buffer pool caches data and indexes. The container limit is
+    # 512Mi, and mysqld needs headroom for connections and temp tables, so 256M
+    # is the practical ceiling. Raise this in step with the memory limit above —
+    # setting it near the limit gets the pod OOM-killed.
+    innodb_buffer_pool_size = 256M
+
+    # --- Durability ---
+    # 1 = flush the redo log to disk on every commit. The only setting that
+    # survives a node failure without data loss, at the cost of write latency.
+    # 2 is faster and loses up to a second of commits on a host crash.
+    innodb_flush_log_at_trx_commit = 1
+    sync_binlog = 1
+
+    # --- Connections ---
+    # auth-service runs 2 gunicorn workers × 4 threads per replica, so even at
+    # 3 replicas the real concurrency is well under this.
+    max_connections = 150
+
+    # --- Logging ---
+    # Log queries slower than 2 seconds to stdout, where `kubectl logs` and the
+    # cluster log pipeline can see them.
+    slow_query_log       = 1
+    long_query_time      = 2
+    log_error_verbosity  = 2
+
+    # --- Networking ---
+    bind-address = 0.0.0.0
+    # DNS reverse lookups on every incoming connection add latency and fail
+    # intermittently inside a cluster. Skipping them means host-based grants
+    # must use IPs, which is already the case here.
+    skip-name-resolve
+
+    # --- Timeouts ---
+    wait_timeout             = 600
+    interactive_timeout      = 600
