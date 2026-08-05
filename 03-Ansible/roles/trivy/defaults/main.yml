@@ -1,0 +1,7 @@
+---
+trivy_apt_url: https://get.trivy.dev/deb
+trivy_gpg_url: https://get.trivy.dev/deb/public.key
+
+# Shared cache so the ~600 MB vulnerability database is downloaded once, not
+# once per user.
+trivy_cache_dir: /var/cache/trivy

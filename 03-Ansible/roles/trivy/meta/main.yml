@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: trivy
+  author: Waleed Darwesh
+  description: Installs the Trivy vulnerability scanner from the Aqua Security APT repository, with a shared cache and nightly database refresh.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - security
+    - scanning
+
+dependencies:
+  - role: common
