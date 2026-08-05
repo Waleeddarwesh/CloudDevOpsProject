@@ -1,0 +1,73 @@
+---
+# ==============================================================================
+# Role: common — default variables
+# ==============================================================================
+# defaults/ has the LOWEST precedence of any variable source, so anything here
+# can be overridden from group_vars, host_vars, or -e on the command line.
+# Role variables that must NOT be overridden belong in vars/ instead.
+# ==============================================================================
+
+common_packages:
+  # --- APT / repository handling ---
+  - apt-transport-https      # required before any https:// APT source is added
+  - ca-certificates          # root CA bundle for TLS verification
+  - gnupg                    # verifies repository signing keys
+  - software-properties-common
+
+  # --- Networking and downloads ---
+  - curl
+  - wget
+
+  # --- Version control ---
+  - git                      # Jenkins clones the repository with this
+
+  # --- Archives ---
+  - unzip                    # AWS CLI v2 is distributed as a zip
+  - tar
+  - gzip
+
+  # --- JSON / YAML processing ---
+  - jq                       # parses AWS CLI output in pipeline scripts
+
+  # --- Python (Ansible modules and boto3) ---
+  - python3
+  - python3-pip
+  - python3-apt              # required by the ansible.builtin.apt module
+
+  # --- Diagnostics ---
+  - htop
+  - net-tools
+  - dnsutils                 # dig/nslookup, for debugging service discovery
+  - tree
+  - vim
+
+# IANA timezone name. Africa/Cairo matches the internship's local timezone, so
+# build timestamps line up with the working day.
+common_timezone: Africa/Cairo
+
+# Cap the systemd journal at 500 MB.
+common_journald_max_use: 500M
+
+common_sysctl_settings:
+  # Raise the inotify watch limit. Docker, containerd and Jenkins each register
+  # thousands of watches; the 8192 default is exhausted quickly and produces
+  # "too many open files" errors that have nothing to do with file descriptors.
+  - name: fs.inotify.max_user_watches
+    value: "524288"
+
+  - name: fs.inotify.max_user_instances
+    value: "512"
+
+  # Raise the file descriptor ceiling for concurrent builds.
+  - name: fs.file-max
+    value: "2097152"
+
+  # Prefer reclaiming page cache over swapping out running processes. The
+  # instance has a 2 GB swap file as an OOM safety net, not as extra RAM.
+  - name: vm.swappiness
+    value: "10"
+
+  # Required by Elasticsearch, which SonarQube embeds. SonarQube refuses to
+  # start below 262144 and reports a bootstrap check failure.
+  - name: vm.max_map_count
+    value: "262144"
