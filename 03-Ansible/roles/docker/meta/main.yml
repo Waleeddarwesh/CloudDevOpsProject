@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  role_name: docker
+  author: Waleed Darwesh
+  description: Installs Docker Engine, Buildx and Compose v2 from the official Docker APT repository, with log rotation and daemon hardening.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - docker
+    - containers
+
+dependencies:
+  # Needs /etc/apt/keyrings, gnupg and ca-certificates from the common role.
+  - role: common

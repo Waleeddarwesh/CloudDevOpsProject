@@ -1,0 +1,38 @@
+---
+docker_apt_url: https://download.docker.com/linux/ubuntu
+docker_gpg_url: https://download.docker.com/linux/ubuntu/gpg
+
+docker_apt_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+
+docker_packages:
+  - docker-ce                  # the Docker daemon
+  - docker-ce-cli              # the `docker` command
+  - containerd.io              # the container runtime beneath Docker
+  - docker-buildx-plugin       # BuildKit — needed for the multi-stage builds in src/
+  - docker-compose-plugin      # provides `docker compose` (v2, no hyphen)
+
+# Overridden from group_vars/all/main.yml.
+docker_users:
+  - ubuntu
+  - jenkins
+
+# --- Daemon configuration (rendered into templates/daemon.json.j2) ---
+
+# Cap per-container log size. 10 MB × 3 files = 30 MB ceiling per container.
+docker_log_max_size: "10m"
+docker_log_max_file: "3"
+
+# overlay2 is the current, fastest storage driver and the default on modern
+# kernels. Set explicitly so a kernel change cannot silently switch it.
+docker_storage_driver: overlay2
+
+# Reclaim disk when total image/container/volume data exceeds this. Without it,
+# a CI server accumulates every image it has ever built until the disk fills.
+docker_gc_threshold: "20GB"
+
+# Enable live-restore so containers keep running across a daemon restart.
+# Deliberately DISABLED here: it is incompatible with changing the daemon's
+# storage or logging configuration, which this role does.
+docker_live_restore: false

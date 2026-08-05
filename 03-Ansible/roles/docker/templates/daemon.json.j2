@@ -1,0 +1,32 @@
+{
+  "_comment": "Managed by Ansible (roles/docker) — changes here are overwritten on the next run.",
+
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "{{ docker_log_max_size }}",
+    "max-file": "{{ docker_log_max_file }}"
+  },
+
+  "storage-driver": "{{ docker_storage_driver }}",
+
+  "live-restore": {{ docker_live_restore | lower }},
+
+  "default-ulimits": {
+    "nofile": {
+      "Name": "nofile",
+      "Hard": 65536,
+      "Soft": 65536
+    }
+  },
+
+  "features": {
+    "buildkit": true
+  },
+
+  "no-new-privileges": true,
+
+  "userland-proxy": false,
+
+  "metrics-addr": "127.0.0.1:9323",
+  "experimental": false
+}
