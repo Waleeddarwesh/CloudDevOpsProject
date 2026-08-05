@@ -1,0 +1,156 @@
+# ==============================================================================
+# Ingress — external access to the frontend
+# ==============================================================================
+# An Ingress object on its own does NOTHING. It is a declarative request that
+# some controller must watch and act on. Applying this to a cluster with no
+# Ingress controller produces a resource whose ADDRESS column stays empty
+# forever, with no error and no event explaining why.
+#
+# On EKS the controller is the AWS Load Balancer Controller, which turns this
+# object into:
+#
+#   Internet
+#      │
+#      ▼
+#   Application Load Balancer   ← created by the controller from this manifest
+#      │  (in the public subnets, discovered by the
+#      │   kubernetes.io/role/elb=1 tag set in Terraform)
+#      ▼
+#   Target Group  ── target-type: ip ──►  frontend pod IPs (private subnets)
+#
+# ------------------------------------------------------------------------------
+# PREREQUISITE — install the controller first
+# ------------------------------------------------------------------------------
+#   helm repo add eks https://aws.github.io/eks-charts
+#   helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+#     -n kube-system \
+#     --set clusterName=ivolve-dev-eks \
+#     --set serviceAccount.create=true \
+#     --set serviceAccount.name=aws-load-balancer-controller \
+#     --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=$(
+#         cd ../../02-Terraform && terraform output -raw aws_load_balancer_controller_role_arn)
+#
+# The IRSA role is created by 02-Terraform/modules/eks/irsa.tf.
+# ==============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    # Applied last, once the frontend Service has endpoints. Creating the ALB
+    # before any healthy target exists means the target group starts unhealthy
+    # and the first requests return 503.
+    argocd.argoproj.io/sync-wave: "4"
+
+    # --------------------------------------------------------------------------
+    # Load balancer placement
+    # --------------------------------------------------------------------------
+    # internet-facing gets a public ALB with public IPs.
+    # `internal` would create a VPC-only load balancer.
+    alb.ingress.kubernetes.io/scheme: internet-facing
+
+    # target-type: ip registers POD IPs directly in the target group.
+    #
+    # The alternative, `instance`, routes to a NodePort on each worker node,
+    # which adds an extra kube-proxy hop and loses the client IP. With the VPC
+    # CNI giving every pod a real VPC IP, `ip` mode lets the ALB reach pods
+    # directly — fewer hops, accurate client IPs, and correct behaviour during
+    # a rolling update because deregistration is per-pod.
+    alb.ingress.kubernetes.io/target-type: ip
+
+    # --------------------------------------------------------------------------
+    # Listeners
+    # --------------------------------------------------------------------------
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+
+    # --- TLS (uncomment once you own a domain and an ACM certificate) ---
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/xxxx
+    # alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    # # Permanent redirect of all plaintext traffic to HTTPS.
+    # alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # --------------------------------------------------------------------------
+    # Health checks
+    # --------------------------------------------------------------------------
+    # These are the ALB's OWN checks, entirely separate from the Kubernetes
+    # readiness probe. Both must pass for traffic to flow, and a target can be
+    # Ready in Kubernetes yet unhealthy in the target group — a common source of
+    # 503s that look inexplicable from `kubectl get pods`.
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/success-codes: "200"
+
+    # --------------------------------------------------------------------------
+    # Target group behaviour
+    # --------------------------------------------------------------------------
+    # Wait 30 seconds before fully removing a draining target, so in-flight
+    # requests finish. Pairs with the frontend's preStop sleep and
+    # terminationGracePeriodSeconds.
+    alb.ingress.kubernetes.io/target-group-attributes: >-
+      deregistration_delay.timeout_seconds=30,
+      stickiness.enabled=true,
+      stickiness.type=lb_cookie,
+      stickiness.lb_cookie.duration_seconds=3600
+
+    # NOTE on stickiness: enabled deliberately. express-session in server.js
+    # keeps sessions in per-pod MEMORY, so a user bounced to a different replica
+    # appears logged out. Stickiness is a workaround; the real fix is a shared
+    # session store (Redis). See docs/ARCHITECTURE.md.
+
+    # --------------------------------------------------------------------------
+    # Operational
+    # --------------------------------------------------------------------------
+    alb.ingress.kubernetes.io/load-balancer-name: ivolve-dev-alb
+    alb.ingress.kubernetes.io/tags: >-
+      Project=CloudDevOpsProject,Environment=dev,ManagedBy=Kubernetes
+
+    # Recycle idle connections. Must exceed the application's own keep-alive
+    # timeout, or the ALB reuses a connection the backend has already closed and
+    # returns a sporadic 502.
+    alb.ingress.kubernetes.io/load-balancer-attributes: >-
+      idle_timeout.timeout_seconds=60,
+      routing.http2.enabled=true,
+      access_logs.s3.enabled=false
+
+spec:
+  # ----------------------------------------------------------------------------
+  # ingressClassName — the modern way to select a controller
+  # ----------------------------------------------------------------------------
+  # This replaces the DEPRECATED annotation:
+  #     kubernetes.io/ingress.class: alb
+  #
+  # That annotation still works on some controllers but is ignored by others,
+  # producing an Ingress that is silently never reconciled. `spec.ingressClassName`
+  # is a real, validated field — a typo produces an error instead of silence.
+  ingressClassName: alb
+
+  rules:
+    # No `host:` is specified, so this rule matches ANY hostname — which is what
+    # you want when the only address is the ALB's auto-generated DNS name.
+    #
+    # Once a real domain exists, add:
+    #   - host: ivolve.example.com
+    # and point a Route 53 alias record at the ALB.
+    - http:
+        paths:
+          - path: /
+            # Prefix matches / and everything beneath it. `Exact` would match
+            # ONLY the literal "/" and 404 every other route.
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  # Matches the port NAME in the frontend Service, so changing
+                  # the number there does not break this reference.
+                  name: http
