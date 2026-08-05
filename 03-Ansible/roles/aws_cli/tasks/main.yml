@@ -1,0 +1,127 @@
+---
+# ==============================================================================
+# Role: aws_cli — AWS CLI v2
+# ==============================================================================
+# The pipeline needs the CLI for two things:
+#   * `aws ecr get-login-password` → authenticate the Docker daemon against ECR
+#   * `aws eks update-kubeconfig`  → generate a kubeconfig for rollout checks
+#
+# Installed from the official zip, NOT from APT. Ubuntu's `awscli` package is
+# version 1.x — a different product with a different feature set that lacks
+# `aws eks update-kubeconfig` entirely. Version 2 is only distributed by AWS as
+# a self-contained bundle.
+#
+# No credentials are configured anywhere in this role. The instance carries an
+# IAM instance profile (created in 02-Terraform/modules/server), so the CLI
+# obtains temporary, auto-rotating credentials from the metadata service.
+# ==============================================================================
+
+- name: Check whether the AWS CLI is already installed
+  ansible.builtin.command: aws --version
+  register: aws_cli_check
+  changed_when: false
+  failed_when: false
+
+- name: Determine whether an install or upgrade is required
+  ansible.builtin.set_fact:
+    # Install when absent, or when the installed major version is not 2.
+    aws_cli_needs_install: >-
+      {{ aws_cli_check.rc != 0 or 'aws-cli/2' not in (aws_cli_check.stdout | default('')) }}
+
+- name: Download the AWS CLI v2 installer
+  ansible.builtin.get_url:
+    url: "{{ aws_cli_download_url }}"
+    dest: /tmp/awscliv2.zip
+    mode: "0644"
+  when: aws_cli_needs_install | bool
+  register: aws_cli_download
+  retries: 3
+  delay: 5
+  until: aws_cli_download is succeeded
+
+- name: Unpack the installer
+  ansible.builtin.unarchive:
+    src: /tmp/awscliv2.zip
+    dest: /tmp
+    # The archive is already on the target host, so Ansible must not try to
+    # copy it from the control node.
+    remote_src: true
+    creates: /tmp/aws/install
+  when: aws_cli_needs_install | bool
+
+- name: Run the AWS CLI installer
+  ansible.builtin.command:
+    # --update makes the installer idempotent: it upgrades an existing v2
+    # installation instead of aborting with "already exists".
+    cmd: /tmp/aws/install --update --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli
+  when: aws_cli_needs_install | bool
+  changed_when: true
+
+- name: Remove the installer artefacts
+  # ~250 MB of extracted files that serve no purpose after installation.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/awscliv2.zip
+    - /tmp/aws
+
+- name: Set the default AWS region system-wide
+  # Without a region the CLI fails with "You must specify a region", which in a
+  # pipeline surfaces as an opaque ECR login failure.
+  ansible.builtin.copy:
+    dest: /etc/profile.d/aws.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible — do not edit by hand.
+      export AWS_DEFAULT_REGION={{ aws_region }}
+      export AWS_REGION={{ aws_region }}
+
+- name: Configure the AWS region for the jenkins user
+  # Jenkins builds run under a non-login shell, which never sources
+  # /etc/profile.d. The config file is read regardless of shell type.
+  ansible.builtin.copy:
+    dest: /var/lib/jenkins/.aws/config
+    owner: jenkins
+    group: jenkins
+    mode: "0644"
+    content: |
+      # Managed by Ansible — do not edit by hand.
+      # No credentials here on purpose: the EC2 instance profile supplies them.
+      [default]
+      region = {{ aws_region }}
+      output = json
+  failed_when: false
+
+- name: Ensure the jenkins .aws directory has correct ownership
+  ansible.builtin.file:
+    path: /var/lib/jenkins/.aws
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+  failed_when: false
+
+- name: Verify the AWS CLI version
+  ansible.builtin.command: aws --version
+  changed_when: false
+  register: aws_cli_final
+
+- name: Verify the instance profile is supplying credentials
+  # Confirms end to end that the IAM role Terraform attached is reachable
+  # through the metadata service. If this fails, every ECR push in the pipeline
+  # will fail too — better to learn that now than during a build.
+  ansible.builtin.command: aws sts get-caller-identity
+  changed_when: false
+  failed_when: false
+  register: aws_identity
+
+- name: Report the AWS CLI status
+  ansible.builtin.debug:
+    msg: >-
+      {{ aws_cli_final.stdout }} —
+      {{ 'instance profile active: ' ~ (aws_identity.stdout | from_json).Arn
+         if aws_identity.rc == 0
+         else 'WARNING: no credentials available from the instance metadata service' }}

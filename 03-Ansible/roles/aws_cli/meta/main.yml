@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  role_name: aws_cli
+  author: Waleed Darwesh
+  description: Installs AWS CLI v2 from the official bundle and configures the default region. Credentials come from the EC2 instance profile.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - aws
+    - cli
+
+dependencies:
+  # Needs unzip and curl.
+  - role: common
