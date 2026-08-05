@@ -1,0 +1,38 @@
+# ==============================================================================
+# systemd drop-in override for jenkins.service
+# ==============================================================================
+# Managed by Ansible (roles/jenkins) — changes are overwritten on the next run.
+#
+# A drop-in in /etc/systemd/system/jenkins.service.d/ is merged over the unit
+# shipped by the package. Editing the packaged unit directly would work until
+# the next `apt upgrade` silently replaced it.
+# ==============================================================================
+
+[Service]
+# Environment= is NOT additive across drop-ins: each assignment replaces any
+# earlier value for the same variable. Both lines below are therefore complete
+# definitions, not additions.
+
+Environment="JAVA_OPTS=-Xms{{ jenkins_java_initial_heap }} -Xmx{{ jenkins_java_heap }} {{ jenkins_java_opts | join(' ') }}"
+Environment="JENKINS_PORT={{ jenkins_http_port }}"
+
+# --- Resource limits ---
+# Jenkins plus its plugins keep thousands of files open. The systemd default of
+# 1024 is exhausted quickly and surfaces as "Too many open files" during a
+# build, which looks like an application bug rather than a limit.
+LimitNOFILE=65536
+
+# --- Restart policy ---
+# Restart on any failure, waiting 10 seconds between attempts.
+Restart=on-failure
+RestartSec=10
+
+# --- Startup timeout ---
+# First boot with a large plugin set can exceed systemd's 90-second default,
+# which would kill Jenkins mid-initialisation and leave a corrupt plugin state.
+TimeoutStartSec=300
+
+# --- Logging ---
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jenkins

@@ -1,0 +1,47 @@
+---
+# Jenkins LTS (Long Term Support) — a stability-focused release line updated
+# every 12 weeks. The weekly line ships new features faster but breaks plugins
+# more often; a CI server should not be on it.
+jenkins_repo_url: https://pkg.jenkins.io/debian-stable
+jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+
+jenkins_plugin_manager_url: >-
+  https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/2.13.2/jenkins-plugin-manager-2.13.2.jar
+
+jenkins_http_port: 8080
+jenkins_home: /var/lib/jenkins
+
+# --- JVM tuning (rendered into templates/override.conf.j2) ---
+
+# Heap size. The instance has 4 GiB total; 2 GiB for Jenkins leaves room for the
+# OS, the Docker daemon, and the build containers Jenkins spawns.
+jenkins_java_heap: "2g"
+
+# Setting -Xms equal to -Xmx pre-allocates the heap at startup. This avoids
+# repeated heap-resize pauses and, more importantly, makes memory exhaustion
+# visible immediately rather than 40 minutes into a long build.
+jenkins_java_initial_heap: "2g"
+
+jenkins_java_opts:
+  # Skips the "Jenkins is not ready" splash screen and the initial setup wizard
+  # nag. The security wizard itself is NOT disabled — the unlock step still
+  # applies.
+  - "-Djenkins.install.runSetupWizard=true"
+  # UTF-8 everywhere, so build logs containing non-ASCII output render
+  # correctly instead of as mojibake.
+  - "-Dfile.encoding=UTF-8"
+  # Uses a non-blocking entropy source. On an EC2 instance with little entropy,
+  # the default blocking source can stall Jenkins startup for minutes while it
+  # waits for /dev/random.
+  - "-Djava.security.egd=file:/dev/./urandom"
+  # G1 is the right collector for a multi-gigabyte heap with latency
+  # sensitivity — it keeps pause times bounded instead of stopping the world.
+  - "-XX:+UseG1GC"
+  - "-XX:MaxGCPauseMillis=200"
+  # Writes a heap dump on OOM so the cause can be analysed after the fact,
+  # rather than restarting blind.
+  - "-XX:+HeapDumpOnOutOfMemoryError"
+  - "-XX:HeapDumpPath=/var/log/jenkins/heapdump.hprof"
+
+# Overridden from group_vars/all/main.yml.
+jenkins_plugins: []

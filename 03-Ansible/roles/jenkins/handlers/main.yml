@@ -1,0 +1,25 @@
+---
+- name: Reload systemd
+  # Required after writing a drop-in override; systemd does not notice new unit
+  # fragments until the manager configuration is reloaded.
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart jenkins
+  ansible.builtin.systemd:
+    name: jenkins
+    state: restarted
+    daemon_reload: true
+
+- name: Wait for Jenkins after restart
+  # A restart handler returns as soon as systemd reports the unit active, which
+  # is well before Jenkins has finished loading plugins. Any later task that
+  # calls the Jenkins API would fail against a still-initialising instance.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/login"
+    status_code: [200, 403]
+    timeout: 10
+  register: jenkins_restart_check
+  retries: 30
+  delay: 10
+  until: jenkins_restart_check.status in [200, 403]

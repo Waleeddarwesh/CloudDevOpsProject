@@ -1,0 +1,187 @@
+---
+# ==============================================================================
+# Role: jenkins — Jenkins controller
+# ==============================================================================
+# Installs the Jenkins LTS release from Jenkins' official APT repository,
+# provisions the plugin set declaratively, and applies JVM tuning.
+#
+# Ordering matters and is enforced by meta/main.yml:
+#   java   → the JVM Jenkins runs on (the package declares no JRE dependency)
+#   docker → the `docker` group must exist before the jenkins user joins it
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Repository
+# ------------------------------------------------------------------------------
+
+- name: Download the Jenkins GPG key
+  ansible.builtin.get_url:
+    url: "{{ jenkins_repo_key_url }}"
+    dest: /etc/apt/keyrings/jenkins-keyring.asc
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+- name: Add the Jenkins APT repository
+  ansible.builtin.apt_repository:
+    # The Jenkins repository is architecture-independent and has no distribution
+    # component, hence the bare "binary/" suffix rather than a codename.
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc]
+      {{ jenkins_repo_url }} binary/
+    filename: jenkins
+    state: present
+    update_cache: true
+
+- name: Install Jenkins
+  ansible.builtin.apt:
+    name: jenkins
+    state: present
+    update_cache: true
+  register: jenkins_install
+  retries: 3
+  delay: 5
+  until: jenkins_install is succeeded
+  notify: Restart jenkins
+
+# ------------------------------------------------------------------------------
+# JVM and service tuning
+# ------------------------------------------------------------------------------
+
+- name: Create the systemd override directory
+  # Configuration goes in a drop-in override rather than by editing
+  # /lib/systemd/system/jenkins.service directly — a package upgrade overwrites
+  # the shipped unit file and would silently discard the changes.
+  ansible.builtin.file:
+    path: /etc/systemd/system/jenkins.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Apply the Jenkins systemd override
+  ansible.builtin.template:
+    src: override.conf.j2
+    dest: /etc/systemd/system/jenkins.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart jenkins
+
+# ------------------------------------------------------------------------------
+# Group membership
+# ------------------------------------------------------------------------------
+
+- name: Add the jenkins user to the docker group
+  # This is what lets pipeline steps run `docker build` without sudo. The
+  # docker role could not do this earlier because the jenkins user did not
+  # exist until the package above was installed.
+  ansible.builtin.user:
+    name: jenkins
+    groups: docker
+    append: true
+  notify: Restart jenkins
+
+# ------------------------------------------------------------------------------
+# Start the service
+# ------------------------------------------------------------------------------
+
+- name: Ensure Jenkins is running and enabled at boot
+  ansible.builtin.systemd:
+    name: jenkins
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for Jenkins to accept HTTP connections
+  # Jenkins takes 30-90 seconds to initialise on first boot. Installing plugins
+  # before it is listening fails with a connection-refused error.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/login"
+    status_code: [200, 403]
+    # 403 is expected and healthy — it means Jenkins is up and enforcing
+    # authentication. Treating it as a failure is a common mistake here.
+    timeout: 10
+  register: jenkins_ready
+  retries: 30
+  delay: 10
+  until: jenkins_ready.status in [200, 403]
+
+# ------------------------------------------------------------------------------
+# Plugins
+# ------------------------------------------------------------------------------
+
+- name: Check whether jenkins-plugin-cli is available
+  ansible.builtin.stat:
+    path: /opt/jenkins-plugin-manager.jar
+  register: plugin_cli
+
+- name: Download the Jenkins plugin manager
+  # Installs plugins from the command line with full dependency resolution —
+  # far more reproducible than clicking through the "install suggested plugins"
+  # wizard, which installs a different set depending on the Jenkins version.
+  ansible.builtin.get_url:
+    url: "{{ jenkins_plugin_manager_url }}"
+    dest: /opt/jenkins-plugin-manager.jar
+    owner: root
+    group: root
+    mode: "0644"
+  when: not plugin_cli.stat.exists
+
+- name: Install the Jenkins plugins
+  ansible.builtin.command:
+    cmd: >-
+      java -jar /opt/jenkins-plugin-manager.jar
+      --war /usr/share/java/jenkins.war
+      --plugin-download-directory {{ jenkins_home }}/plugins
+      --plugins {{ jenkins_plugins | join(' ') }}
+    # Skip the whole step if the marker exists, so re-running the playbook does
+    # not re-download 60 plugins.
+    creates: "{{ jenkins_home }}/plugins/.ansible-plugins-installed"
+  register: plugin_install
+  notify: Restart jenkins
+
+- name: Fix plugin directory ownership
+  # The plugin manager runs as root, leaving root-owned files that the jenkins
+  # user cannot read — Jenkins then starts with zero plugins loaded and no
+  # obvious error.
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/plugins"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    recurse: true
+  when: plugin_install.changed
+
+- name: Write the plugin installation marker
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/plugins/.ansible-plugins-installed"
+    state: touch
+    owner: jenkins
+    group: jenkins
+    mode: "0644"
+  when: plugin_install.changed
+
+# ------------------------------------------------------------------------------
+# Workspace hygiene
+# ------------------------------------------------------------------------------
+
+- name: Install the workspace cleanup cron job
+  # Jenkins workspaces and Docker build caches grow without bound. A full disk
+  # is the single most common cause of a CI server that "suddenly stopped
+  # working" with unrelated-looking errors.
+  ansible.builtin.cron:
+    name: "Prune unused Docker data"
+    minute: "0"
+    hour: "3"
+    job: "/usr/bin/docker system prune -af --filter 'until=168h' >> /var/log/docker-prune.log 2>&1"
+    user: root
+
+- name: Report the Jenkins status
+  ansible.builtin.debug:
+    msg: >-
+      Jenkins is listening on port {{ jenkins_http_port }}
+      with {{ jenkins_plugins | length }} plugins provisioned.
