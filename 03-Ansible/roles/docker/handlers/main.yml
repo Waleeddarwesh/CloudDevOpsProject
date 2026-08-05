@@ -1,0 +1,7 @@
+---
+- name: Restart docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+    # Picks up unit-file changes shipped by a package upgrade.
+    daemon_reload: true

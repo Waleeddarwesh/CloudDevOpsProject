@@ -1,0 +1,159 @@
+---
+# ==============================================================================
+# Role: docker — Docker Engine + Compose plugin
+# ==============================================================================
+# Installs from Docker's official APT repository rather than Ubuntu's `docker.io`
+# package, which lags several minor versions behind and does not ship the
+# Compose v2 plugin.
+#
+# The repository is added with a DEDICATED signing key in /etc/apt/keyrings and
+# `signed-by=`, so this key can only validate the Docker repository. The old
+# `apt_key` module put every key into a single shared trusted.gpg where any key
+# could sign any repository — a real supply-chain risk, and the reason apt_key
+# is deprecated.
+# ==============================================================================
+
+- name: Remove distribution Docker packages
+  # Ubuntu's docker.io / docker-doc / podman-docker conflict with the official
+  # packages. Leaving them installed produces a confusing half-working setup
+  # where `docker compose` is missing but `docker` works.
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+    purge: true
+
+- name: Download the Docker GPG key
+  # Fetched as ASCII-armoured text, then de-armoured below. Downloading the
+  # binary form directly is fragile because the URL serves the armoured version.
+  ansible.builtin.get_url:
+    url: "{{ docker_gpg_url }}"
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+    # Do not overwrite an existing key on every run — that would report
+    # changed=1 forever and break idempotency.
+    force: false
+  register: docker_key
+
+- name: Convert the Docker key to binary keyring format
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg /etc/apt/keyrings/docker.asc
+    # `creates` makes this task idempotent without a shell test: Ansible skips
+    # it entirely when the target file already exists.
+    creates: /etc/apt/keyrings/docker.gpg
+
+- name: Ensure the Docker keyring is world-readable
+  # APT runs unprivileged (as _apt) when fetching indexes and cannot read a
+  # 0600 keyring — the symptom is a signature verification error that looks
+  # like a corrupted key.
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/docker.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Docker APT repository
+  ansible.builtin.apt_repository:
+    # signed-by binds this repository to that one key.
+    # ansible_facts.distribution_release resolves to "jammy" / "noble", so this
+    # keeps working across Ubuntu releases instead of hardcoding a codename.
+    repo: >-
+      deb [arch={{ docker_apt_arch_map[ansible_facts['architecture']] }}
+      signed-by=/etc/apt/keyrings/docker.gpg]
+      {{ docker_apt_url }} {{ ansible_facts['distribution_release'] }} stable
+    filename: docker
+    state: present
+    update_cache: true
+
+- name: Install Docker Engine and plugins
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: true
+  register: docker_install
+  retries: 3
+  delay: 5
+  until: docker_install is succeeded
+  notify: Restart docker
+
+- name: Configure the Docker daemon
+  # log-opts is the important part. Docker's default json-file driver has NO
+  # size limit, so a container logging in a loop fills the root volume and takes
+  # Jenkins down with it.
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    # Reject an invalid config before writing it — a malformed daemon.json
+    # prevents dockerd from starting at all, and recovering means SSH-ing in to
+    # hand-edit the file.
+    validate: "python3 -c 'import json,sys; json.load(open(sys.argv[1]))' %s"
+  notify: Restart docker
+
+- name: Ensure Docker is running and enabled at boot
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Add users to the docker group
+  # SECURITY: membership of the `docker` group is equivalent to root. Any member
+  # can run `docker run -v /:/host --privileged` and own the machine. Acceptable
+  # for the CI user on a dedicated build server, and the reason that server is
+  # dedicated.
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    # append is essential — without it this REPLACES the user's entire
+    # supplementary group list, which for the jenkins user removes access it
+    # needs elsewhere.
+    append: true
+  loop: "{{ docker_users }}"
+  # The jenkins user does not exist until the jenkins role runs. Failing here
+  # would abort the play before Jenkins is ever installed.
+  failed_when: false
+  register: docker_group_result
+
+- name: Install the Docker SDK for Python
+  # Required by the community.docker.* modules used in the sonarqube role.
+  # --break-system-packages is needed on Ubuntu 24.04+, where PEP 668 marks the
+  # system Python as externally managed.
+  ansible.builtin.pip:
+    name:
+      - docker
+      - requests
+    state: present
+    extra_args: "--break-system-packages"
+  # Older pip does not recognise the flag; retry without it.
+  register: docker_sdk
+  failed_when: false
+
+- name: Install the Docker SDK without PEP 668 override
+  ansible.builtin.pip:
+    name:
+      - docker
+      - requests
+    state: present
+  when: docker_sdk is failed
+
+- name: Verify Docker is operational
+  ansible.builtin.command: docker info
+  changed_when: false
+  register: docker_info
+
+- name: Report the Docker version
+  ansible.builtin.debug:
+    msg: >-
+      Docker {{ docker_info.stdout | regex_search('Server Version:\s*(\S+)', '\1') | first | default('unknown') }}
+      is running with the {{ docker_info.stdout | regex_search('Storage Driver:\s*(\S+)', '\1') | first | default('unknown') }}
+      storage driver.
