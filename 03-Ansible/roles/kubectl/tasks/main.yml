@@ -1,0 +1,103 @@
+---
+# ==============================================================================
+# Role: kubectl — Kubernetes CLI
+# ==============================================================================
+# Used by the pipeline's optional rollout-verification stage
+# (`kubectl rollout status`) and for manual cluster inspection from the server.
+#
+# Installed from pkgs.k8s.io, the community-maintained repository that replaced
+# apt.kubernetes.io in 2023. The old repository was FROZEN and now serves
+# nothing — playbooks still pointing at it fail with a 404, which is a very
+# common stale-tutorial failure.
+#
+# Note the repository URL embeds the MINOR version (v1.31), so each Kubernetes
+# minor release has its own repository. Upgrading kubectl means changing the
+# repository, not just running `apt upgrade`.
+# ==============================================================================
+
+- name: Download the Kubernetes APT signing key
+  ansible.builtin.get_url:
+    url: "{{ kubectl_repo_url }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes.asc
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+- name: Convert the Kubernetes key to binary keyring format
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes.gpg /etc/apt/keyrings/kubernetes.asc
+    creates: /etc/apt/keyrings/kubernetes.gpg
+
+- name: Ensure the Kubernetes keyring is world-readable
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/kubernetes.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Kubernetes APT repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/kubernetes.gpg]
+      {{ kubectl_repo_url }}/deb/ /
+    filename: kubernetes
+    state: present
+    update_cache: true
+
+- name: Install kubectl
+  ansible.builtin.apt:
+    name: kubectl
+    state: present
+    update_cache: true
+  register: kubectl_install
+  retries: 3
+  delay: 5
+  until: kubectl_install is succeeded
+
+- name: Hold the kubectl package at its current version
+  # An unattended upgrade that jumps kubectl beyond the ±1 minor version skew
+  # Kubernetes supports produces subtle API incompatibilities rather than a
+  # clean failure. Pinning makes the upgrade a deliberate act.
+  ansible.builtin.dpkg_selections:
+    name: kubectl
+    selection: hold
+
+- name: Install the kubectl bash completion
+  # Quality-of-life for anyone debugging on the box. `kubectl get po<TAB>` and
+  # resource-name completion save a lot of typing during an incident.
+  ansible.builtin.shell:
+    cmd: kubectl completion bash > /etc/bash_completion.d/kubectl
+    creates: /etc/bash_completion.d/kubectl
+
+- name: Add a kubectl alias
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubectl.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible — do not edit by hand.
+      alias k=kubectl
+      # Make the alias inherit kubectl's completions too.
+      complete -o default -F __start_kubectl k 2>/dev/null || true
+
+- name: Create the kubeconfig directory for the jenkins user
+  # `aws eks update-kubeconfig` writes here when the pipeline authenticates to
+  # the cluster. Without the directory it fails with a permission error.
+  ansible.builtin.file:
+    path: /var/lib/jenkins/.kube
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0700"
+  failed_when: false
+
+- name: Verify the kubectl installation
+  ansible.builtin.command: kubectl version --client
+  changed_when: false
+  register: kubectl_version_out
+
+- name: Report the kubectl version
+  ansible.builtin.debug:
+    msg: "{{ kubectl_version_out.stdout_lines[0] | default('kubectl installed') }}"

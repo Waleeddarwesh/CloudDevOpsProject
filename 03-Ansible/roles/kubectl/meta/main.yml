@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: kubectl
+  author: Waleed Darwesh
+  description: Installs kubectl from pkgs.k8s.io with a version hold and shell completion.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - kubernetes
+    - cli
+
+dependencies:
+  - role: common
