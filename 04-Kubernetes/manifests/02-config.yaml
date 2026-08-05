@@ -1,0 +1,129 @@
+# ==============================================================================
+# ConfigMap and Secret — application configuration
+# ==============================================================================
+# The split is deliberate and is the whole point of having two object types:
+#
+#   ConfigMap  non-sensitive settings. Safe to read, safe to commit, visible in
+#              `kubectl describe`.
+#   Secret     credentials. Restricted by RBAC, encrypted at rest in etcd by the
+#              KMS key Terraform created (02-Terraform/modules/eks/main.tf →
+#              encryption_config).
+#
+# Putting a password in a ConfigMap is a real mistake, not a stylistic one:
+# ConfigMaps appear in full in `kubectl describe pod` output, in most read-only
+# RBAC roles, and in the ArgoCD UI.
+# ==============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ivolve-config
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: ivolve-config
+    app.kubernetes.io/part-of: ivolve
+data:
+  # ----------------------------------------------------------------------------
+  # Database — non-sensitive connection parameters
+  # ----------------------------------------------------------------------------
+  # Note the key names match what auth-service/app.py actually reads:
+  #     os.environ.get("DB_HOST") / ("DB_PORT") / ("DB_USER") / ("DB_NAME")
+  # The password is NOT here — it lives in the Secret below.
+  DB_HOST: "mysql-0.mysql.ivolve.svc.cluster.local"
+  DB_PORT: "3306"
+  DB_NAME: "ivolve"
+  DB_USER: "ivolve_user"
+
+  # Consumed by the MySQL StatefulSet itself.
+  MYSQL_DATABASE: "ivolve"
+  MYSQL_USER: "ivolve_user"
+
+  # ----------------------------------------------------------------------------
+  # Service discovery — how the frontend reaches the two backends
+  # ----------------------------------------------------------------------------
+  # These are Kubernetes DNS names. `auth-service` resolves through CoreDNS to
+  # the ClusterIP of the Service of that name in this namespace; the Service
+  # then load-balances across its healthy pods.
+  #
+  # The short form works because pods receive a search domain of
+  # `ivolve.svc.cluster.local`. The fully-qualified form is used for the
+  # database (above) because a StatefulSet pod's stable identity requires it.
+  #
+  # Read by frontend/server.js:
+  #     process.env.AUTH_SERVICE_URL / process.env.ROADMAP_SERVICE_URL
+  AUTH_SERVICE_URL: "http://auth-service:5000"
+  ROADMAP_SERVICE_URL: "http://roadmap-service:8080"
+
+  # ----------------------------------------------------------------------------
+  # Runtime tuning
+  # ----------------------------------------------------------------------------
+  NODE_ENV: "production"
+  JAVA_OPTS: "-XX:MaxRAMPercentage=75.0 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
+
+---
+# ==============================================================================
+# Secret
+# ==============================================================================
+#  ⚠️  THE VALUES BELOW ARE PLACEHOLDERS AND MUST BE REPLACED BEFORE DEPLOYMENT
+# ==============================================================================
+# A Secret manifest committed to Git is only base64-ENCODED, which is encoding,
+# not encryption — `base64 -d` reverses it instantly. This file is committed so
+# the required KEYS are documented and so ArgoCD has something to sync, but the
+# values are deliberately obvious placeholders.
+#
+# ------------------------------------------------------------------------------
+# For real use, pick one of these instead
+# ------------------------------------------------------------------------------
+#
+# 1. Sealed Secrets (simplest to adopt)
+#      kubeseal --format yaml < 02-config.yaml > 02-config-sealed.yaml
+#    The controller holds the private key; only the cluster can decrypt, so the
+#    sealed file is safe in a public repository.
+#
+# 2. External Secrets Operator + AWS Secrets Manager (best for AWS)
+#    Secrets live in Secrets Manager; ESO projects them into the cluster and
+#    refreshes on rotation. Nothing sensitive ever enters Git.
+#
+# 3. Out-of-band creation (fine for a lab, invisible to GitOps)
+#      kubectl create secret generic ivolve-secret -n ivolve \
+#        --from-literal=MYSQL_ROOT_PASSWORD="$(openssl rand -base64 24)" \
+#        --from-literal=MYSQL_PASSWORD="$(openssl rand -base64 24)" \
+#        --from-literal=DB_PASSWORD="$(openssl rand -base64 24)" \
+#        --from-literal=SESSION_SECRET="$(openssl rand -base64 32)"
+#    Then delete this document and add the Secret to ArgoCD's ignoreDifferences.
+#
+# See docs/SECURITY.md for the full comparison.
+# ==============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ivolve-secret
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: ivolve-secret
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    ivolve.io/warning: "Placeholder values — replace before any real deployment"
+type: Opaque
+
+# stringData accepts plaintext and Kubernetes base64-encodes it on write.
+# The alternative, `data`, requires values to be pre-encoded — which reads as
+# though it were protecting something, and misleads people into thinking it is.
+stringData:
+  # MySQL superuser. Used only by the StatefulSet's own initialisation and its
+  # liveness probe; no application authenticates as root.
+  MYSQL_ROOT_PASSWORD: "CHANGE_ME_root_password"
+
+  # Password for the least-privilege `ivolve_user` account created by MySQL on
+  # first boot. Must match DB_PASSWORD below — they are the same credential,
+  # named differently because the two containers read different variables.
+  MYSQL_PASSWORD: "CHANGE_ME_app_password"
+
+  # Read by auth-service/app.py as os.environ.get("DB_PASSWORD").
+  DB_PASSWORD: "CHANGE_ME_app_password"
+
+  # HMAC key signing the express-session cookie in frontend/server.js.
+  # server.js falls back to the literal "change-me-in-k8s" when unset — anyone
+  # who knows that default can forge a session cookie for any user and bypass
+  # login entirely.
+  SESSION_SECRET: "CHANGE_ME_long_random_session_secret"
