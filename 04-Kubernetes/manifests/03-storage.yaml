@@ -1,0 +1,87 @@
+# ==============================================================================
+# StorageClass — dynamic EBS provisioning for the database
+# ==============================================================================
+# A StorageClass describes a CLASS of storage. When the MySQL StatefulSet's
+# volumeClaimTemplate requests `storageClassName: ivolve-storage`, the EBS CSI
+# driver reads this definition, calls the EC2 API, creates a real EBS volume,
+# and binds it to the PersistentVolumeClaim.
+#
+# ------------------------------------------------------------------------------
+# The provisioner value is the single most important line in this file
+# ------------------------------------------------------------------------------
+# It MUST be `ebs.csi.aws.com`.
+#
+# The old value, `kubernetes.io/aws-ebs`, refers to the IN-TREE provisioner that
+# was deprecated in Kubernetes 1.23 and REMOVED in 1.27. On a modern EKS cluster
+# a StorageClass using it produces a PVC that stays Pending forever, with the
+# real cause buried in the controller-manager logs and no event on the PVC
+# itself explaining why.
+#
+# The CSI driver is installed as an EKS add-on with an IRSA role — see
+# 02-Terraform/modules/eks/addons.tf and irsa.tf. Without that role the driver
+# is present but cannot call CreateVolume, producing the same Pending symptom.
+# ==============================================================================
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ivolve-storage
+  labels:
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    # Marks this as the cluster default, so a PVC that omits storageClassName
+    # still gets a usable volume rather than hanging.
+    storageclass.kubernetes.io/is-default-class: "true"
+
+# The CSI driver that fulfils claims of this class.
+provisioner: ebs.csi.aws.com
+
+parameters:
+  # gp3 over gp2: a flat 3,000 IOPS and 125 MB/s baseline regardless of volume
+  # size, and roughly 20% cheaper per GiB. gp2's performance scales with
+  # capacity, so a small gp2 volume is slow purely because it is small.
+  type: gp3
+
+  # ext4 is the safe default. xfs is faster for very large files but offers no
+  # advantage for a MySQL data directory at this scale.
+  csi.storage.k8s.io/fstype: ext4
+
+  # Encryption at rest. MySQL here stores bcrypt password hashes; an unencrypted
+  # EBS snapshot copied to another account would expose them.
+  encrypted: "true"
+
+  # Omitting kmsKeyId uses the account's default `aws/ebs` key. Set it to the
+  # cluster KMS key ARN (terraform output -raw ... ) for a customer-managed key.
+  # kmsKeyId: "arn:aws:kms:us-east-1:123456789012:key/..."
+
+# ------------------------------------------------------------------------------
+# volumeBindingMode — the second most important line
+# ------------------------------------------------------------------------------
+# WaitForFirstConsumer delays creating the EBS volume until the pod has been
+# SCHEDULED, so the volume is created in the same Availability Zone as the node
+# that will mount it.
+#
+# The alternative, `Immediate`, creates the volume as soon as the PVC exists —
+# before any node is chosen. An EBS volume cannot cross AZ boundaries, so if the
+# scheduler later picks a node in a different AZ the pod is stuck permanently
+# in ContainerCreating with:
+#     "volume node affinity conflict"
+#
+# This project spans two AZs, which makes the failure a coin flip with
+# `Immediate`. WaitForFirstConsumer makes it impossible.
+volumeBindingMode: WaitForFirstConsumer
+
+# ------------------------------------------------------------------------------
+# reclaimPolicy
+# ------------------------------------------------------------------------------
+# Retain keeps the underlying EBS volume when the PVC is deleted. Deleting a
+# StatefulSet, or `kubectl delete -k .`, therefore does NOT destroy the database
+# — the data survives and can be re-attached to a new PVC.
+#
+# The trade-off is that orphaned volumes accumulate and bill until removed by
+# hand. That is the correct trade for a database; use Delete for scratch data.
+reclaimPolicy: Retain
+
+# Permits `kubectl edit pvc` to grow the volume without recreating the pod.
+# Note this only ever grows — EBS volumes cannot be shrunk.
+allowVolumeExpansion: true
