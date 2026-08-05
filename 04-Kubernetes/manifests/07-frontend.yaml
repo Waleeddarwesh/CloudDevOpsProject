@@ -1,0 +1,331 @@
+# ==============================================================================
+# Frontend — Deployment, Service, HPA, PodDisruptionBudget
+# ==============================================================================
+# Node.js 22 / Express 5 / EJS on port 3000. The ONLY service exposed to users.
+#
+# Routes (from src/frontend/server.js):
+#   GET  /         → login page   (redirects to /roadmap when a session exists)
+#   GET  /signup   → signup page
+#   POST /signup   → proxies to auth-service  POST /api/auth/signup
+#   POST /login    → proxies to auth-service  POST /api/auth/login
+#   GET  /roadmap  → proxies to roadmap-service GET /api/roadmap
+#   POST /logout   → destroys the session
+#
+# It calls both backends SERVER-SIDE. The browser never contacts auth-service or
+# roadmap-service directly, which is why both remain ClusterIP-only.
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    # Wave 3 — last. Both backends are healthy before the frontend accepts a
+    # single user request, so nobody ever sees the "service unavailable" page
+    # during a deploy.
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 300
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: frontend
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: ivolve
+    spec:
+      serviceAccountName: frontend
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        # uid 1000 = the `node` user that ships with the official Node image.
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: frontend
+
+      containers:
+        - name: frontend
+          image: ivolve-frontend:dev
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          env:
+            # ------------------------------------------------------------------
+            # Backend service discovery
+            # ------------------------------------------------------------------
+            # server.js defaults these to http://localhost:5000 and :8080, which
+            # is correct for a developer laptop and completely wrong in a pod —
+            # localhost inside a pod is the pod itself. Both MUST be set here.
+            - name: AUTH_SERVICE_URL
+              valueFrom:
+                configMapKeyRef: { name: ivolve-config, key: AUTH_SERVICE_URL }
+            - name: ROADMAP_SERVICE_URL
+              valueFrom:
+                configMapKeyRef: { name: ivolve-config, key: ROADMAP_SERVICE_URL }
+
+            # ------------------------------------------------------------------
+            # Session signing key
+            # ------------------------------------------------------------------
+            # server.js falls back to the literal string "change-me-in-k8s".
+            # Anyone who reads the public upstream repository knows that value
+            # and can forge a signed session cookie for any username — full
+            # authentication bypass. This is the single most important
+            # environment variable in the whole deployment.
+            #
+            # NOTE: express-session stores sessions in MEMORY by default, so
+            # each replica has its own session store. With 2+ replicas a user
+            # whose request lands on a different pod appears logged out. A
+            # production fix is a shared store (Redis) or sticky sessions at the
+            # ALB. Documented in docs/ARCHITECTURE.md as a known limitation of
+            # the upstream application.
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef: { name: ivolve-secret, key: SESSION_SECRET }
+
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef: { name: ivolve-config, key: NODE_ENV }
+
+          # --------------------------------------------------------------------
+          # Probes
+          # --------------------------------------------------------------------
+          # GET / returns 200 (the login page) regardless of backend health,
+          # because server.js only calls the backends on POST /login and
+          # GET /roadmap. That makes it a true check of THIS process and not a
+          # transitive check of its dependencies — which is exactly what a
+          # liveness probe should be.
+          #
+          # If / did depend on the backends, a roadmap-service outage would fail
+          # liveness on every frontend pod and restart them all, turning a
+          # partial degradation into a total outage.
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20 # 60s budget — Node starts fast
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 400m
+              memory: 256Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          # --------------------------------------------------------------------
+          # Graceful shutdown
+          # --------------------------------------------------------------------
+          # Kubernetes removes a pod from Service endpoints and sends SIGTERM
+          # CONCURRENTLY, not in order. For a few seconds the ALB may still send
+          # requests to a pod that has already begun shutting down, producing
+          # 502s during every deploy.
+          #
+          # Sleeping in preStop delays SIGTERM long enough for the endpoint
+          # removal to propagate to kube-proxy and the ALB target group.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "10"]
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+
+      # Must exceed the preStop sleep (10s) plus the time to drain in-flight
+      # requests, or the pod is SIGKILLed while still finishing them.
+      terminationGracePeriodSeconds: 40
+
+---
+# ------------------------------------------------------------------------------
+# Service — ClusterIP, fronted by the Ingress
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: ivolve
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: frontend
+
+---
+# ------------------------------------------------------------------------------
+# NodePort Service — fallback external access
+# ------------------------------------------------------------------------------
+# Provided as a documented ALTERNATIVE to the Ingress, and as a diagnostic tool.
+#
+# Comparison of the three ways to expose a Service:
+#
+#   ClusterIP  internal only              — the default
+#   NodePort   opens the same port on     — no AWS resources, no cost, but the
+#              EVERY node (30000-32767)     port is ugly and you must know a
+#                                            node IP; nothing load-balances
+#   Ingress    L7 routing via an ALB      — real hostnames, TLS, path routing;
+#                                            requires a controller and bills hourly
+#
+# Useful when debugging: if the NodePort works but the Ingress does not, the
+# problem is the ALB / Load Balancer Controller, not the application.
+#
+# NOTE: the worker nodes are in PRIVATE subnets, so this NodePort is reachable
+# only from inside the VPC (for example from the Jenkins server), not from the
+# internet. That is intentional.
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-nodeport
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: ivolve
+  annotations:
+    ivolve.io/purpose: "Diagnostic / fallback access — the Ingress is the primary path"
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      # Must fall within the 30000-32767 range. Pinning it (rather than letting
+      # Kubernetes allocate) keeps the URL stable across recreations.
+      nodePort: 30080
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: frontend
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: ivolve
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+
+  minReplicas: 2
+  maxReplicas: 8
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+  namespace: ivolve
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: ivolve
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
