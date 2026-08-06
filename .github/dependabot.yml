@@ -1,0 +1,100 @@
+# ==============================================================================
+# Dependabot — automated dependency updates
+# ==============================================================================
+# Opens a pull request when a dependency has a newer version, and immediately
+# when one has a published security advisory.
+#
+# This is what keeps the Trivy gate passable over time. Without it, base images
+# drift and eventually every build fails on CVEs nobody was watching for.
+# ==============================================================================
+
+version: 2
+
+updates:
+  # ----------------------------------------------------------------------------
+  # Container base images
+  # ----------------------------------------------------------------------------
+  # The highest-value entry here — base images accumulate CVEs fastest, and they
+  # are what the Trivy gate scans.
+  - package-ecosystem: docker
+    directories:
+      - "/src/frontend"
+      - "/src/auth-service"
+      - "/src/roadmap-service"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "docker", "security"]
+    commit-message:
+      prefix: "build"
+      include: scope
+
+  # ----------------------------------------------------------------------------
+  # Node.js — frontend
+  # ----------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: "/src/frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "javascript"]
+    commit-message:
+      prefix: "build"
+      include: scope
+    groups:
+      # Batch patch and minor bumps into one PR instead of ten.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # ----------------------------------------------------------------------------
+  # Python — auth-service
+  # ----------------------------------------------------------------------------
+  - package-ecosystem: pip
+    directory: "/src/auth-service"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "python"]
+    commit-message:
+      prefix: "build"
+      include: scope
+
+  # ----------------------------------------------------------------------------
+  # Java — roadmap-service
+  # ----------------------------------------------------------------------------
+  - package-ecosystem: maven
+    directory: "/src/roadmap-service"
+    schedule:
+      interval: weekly
+    labels: ["dependencies", "java"]
+    commit-message:
+      prefix: "build"
+      include: scope
+
+  # ----------------------------------------------------------------------------
+  # Terraform providers
+  # ----------------------------------------------------------------------------
+  - package-ecosystem: terraform
+    directories:
+      - "/02-Terraform"
+      - "/02-Terraform/bootstrap"
+      - "/02-Terraform/modules/*"
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "terraform"]
+    commit-message:
+      prefix: "chore"
+      include: scope
+
+  # ----------------------------------------------------------------------------
+  # GitHub Actions
+  # ----------------------------------------------------------------------------
+  # Pinning and updating actions matters: a compromised third-party action runs
+  # with your workflow token.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"
