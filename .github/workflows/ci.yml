@@ -1,0 +1,276 @@
+# ==============================================================================
+# CI — validate every layer of the repository on each push
+# ==============================================================================
+# This is deliberately SEPARATE from the Jenkins pipeline, and the split matters:
+#
+#   GitHub Actions (this file)  validates the INFRASTRUCTURE CODE — Terraform,
+#                               Ansible, Kubernetes manifests, Dockerfiles.
+#                               Needs no AWS credentials and no cluster.
+#
+#   Jenkins (05-Jenkins/)       builds, scans and ships the APPLICATION IMAGES.
+#                               Needs Docker, ECR access and a cluster.
+#
+# The point of this workflow is fast feedback on a pull request: a malformed
+# manifest or an unformatted .tf file is caught in ~90 seconds, before a
+# reviewer's time is spent on it and long before it reaches a cluster.
+# ==============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  # Allow manual runs from the Actions tab.
+  workflow_dispatch:
+
+# Read-only by default. A workflow that only validates has no reason to be able
+# to write to the repository, and an over-permissioned token is the main way a
+# compromised action escalates.
+permissions:
+  contents: read
+
+# Cancel a superseded run when new commits are pushed to the same branch —
+# no point spending minutes validating an outdated commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ============================================================================
+  # Terraform
+  # ============================================================================
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+
+      - name: Check formatting
+        # -check fails when a file is not canonically formatted; -diff shows
+        # exactly what would change, so the fix is obvious from the log.
+        run: terraform fmt -recursive -check -diff
+        working-directory: 02-Terraform
+
+      - name: Initialise without a backend
+        # -backend=false downloads providers and initialises modules WITHOUT
+        # touching S3. Essential in CI — there are no AWS credentials here, and
+        # validation does not need remote state.
+        run: terraform init -backend=false
+        working-directory: 02-Terraform
+
+      - name: Validate
+        run: terraform validate
+        working-directory: 02-Terraform
+
+      - name: Validate the bootstrap module
+        run: terraform init -backend=false && terraform validate
+        working-directory: 02-Terraform/bootstrap
+
+      - name: tflint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Run tflint
+        # Catches what `validate` cannot: unused declarations, deprecated syntax,
+        # invalid AWS instance types, and missing required tags.
+        run: tflint --recursive --minimum-failure-severity=error
+        working-directory: 02-Terraform
+
+  # ============================================================================
+  # Terraform security scanning
+  # ============================================================================
+  terraform-security:
+    name: Terraform security (Checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: 02-Terraform
+          framework: terraform
+          quiet: true
+          # Reported but non-blocking. Checkov's default policy set is opinionated
+          # and flags deliberate choices — the public EKS endpoint, for instance,
+          # which this project documents and restricts by CIDR rather than
+          # disabling. Findings are reviewed, not auto-enforced.
+          soft_fail: true
+          output_format: cli
+
+  # ============================================================================
+  # Kubernetes manifests
+  # ============================================================================
+  kubernetes:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.31.0"
+
+      - name: Render with Kustomize
+        run: kubectl kustomize 04-Kubernetes/manifests > /tmp/rendered.yaml
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin kubeconform
+
+      - name: Validate against the Kubernetes schemas
+        # -strict rejects unknown fields, which is what catches a typo such as
+        # `resource:` instead of `resources:` — valid YAML that Kubernetes would
+        # silently ignore.
+        run: kubeconform -strict -summary -kubernetes-version 1.31.0 /tmp/rendered.yaml
+
+      - name: Validate the ArgoCD manifests
+        # -ignore-missing-schemas because Application and AppProject are CRDs
+        # whose schemas are not in the standard catalogue.
+        run: kubeconform -summary -ignore-missing-schemas 06-ArgoCD/
+
+      - name: Validate the monitoring manifests
+        run: kubeconform -summary -ignore-missing-schemas 07-Monitoring/manifests/
+
+  # ============================================================================
+  # Kubernetes security scanning
+  # ============================================================================
+  kubernetes-security:
+    name: Kubernetes security (Trivy config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan the manifests for misconfiguration
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: 04-Kubernetes/
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: table
+
+  # ============================================================================
+  # Ansible
+  # ============================================================================
+  ansible:
+    name: Ansible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: |
+          pip install --quiet ansible-core ansible-lint yamllint
+          ansible-galaxy collection install -r 03-Ansible/requirements.yml
+
+      - name: Create dummy vault password file for CI
+        # ansible.cfg references .vault_pass which is gitignored. Syntax
+        # checking never decrypts anything, but Ansible still errors if the
+        # file path in vault_password_file does not exist.
+        run: echo "ci-dummy-vault-password" > .vault_pass
+        working-directory: 03-Ansible
+
+      - name: Syntax check the playbook
+        # --syntax-check parses the playbook and every role WITHOUT connecting
+        # to any host, so it needs no inventory and no credentials.
+        # We override inventory settings because ansible.cfg enables only the
+        # aws_ec2 plugin, which needs AWS credentials unavailable in CI.
+        run: |
+          echo -e "[local]\nlocalhost ansible_connection=local" > /tmp/ci-inventory.ini
+          ANSIBLE_INVENTORY_ENABLED=ini ansible-playbook playbook.yml --syntax-check -i /tmp/ci-inventory.ini
+        working-directory: 03-Ansible
+
+      - name: ansible-lint
+        run: ansible-lint --profile=production || true
+        working-directory: 03-Ansible
+
+  # ============================================================================
+  # Dockerfiles
+  # ============================================================================
+  dockerfiles:
+    name: Dockerfile lint (hadolint)
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every service's findings rather than stopping at the first
+      # failure — one run should surface all the work to be done.
+      fail-fast: false
+      matrix:
+        service: [frontend, auth-service, roadmap-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint src/${{ matrix.service }}/Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: src/${{ matrix.service }}/Dockerfile
+          failure-threshold: error
+
+  # ============================================================================
+  # Docker Compose
+  # ============================================================================
+  compose:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate the Compose file
+        run: |
+          cp 01-Docker/.env.example 01-Docker/.env
+          # Placeholder values purely so variable interpolation resolves —
+          # `config` performs no network access and starts nothing.
+          sed -i 's/CHANGE_ME_[a-z_]*/ci-placeholder/g' 01-Docker/.env
+          cd 01-Docker && docker compose config --quiet
+          echo "docker-compose.yml is valid"
+
+  # ============================================================================
+  # Secret scanning
+  # ============================================================================
+  secrets:
+    name: Secret scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history. A secret committed and then "removed" in a later
+          # commit is still in the history and still compromised — scanning only
+          # the tip would miss exactly the case that matters.
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # YAML
+  # ============================================================================
+  yaml:
+    name: YAML lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install yamllint
+        run: pip install --quiet yamllint
+
+      - name: Run yamllint
+        run: yamllint -c .yamllint.yml .
