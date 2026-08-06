@@ -1,0 +1,128 @@
+# ==============================================================================
+# ArgoCD AppProject — the security boundary around this application
+# ==============================================================================
+# Every ArgoCD Application belongs to a Project. Without an explicit one they
+# land in `default`, which permits ANY source repository, ANY destination
+# cluster, and ANY Kubernetes resource kind.
+#
+# That matters because ArgoCD runs with cluster-admin. An Application in the
+# `default` project is a path from "someone can commit YAML" to "someone can
+# create a ClusterRoleBinding granting themselves cluster-admin". The Project is
+# what constrains it.
+#
+# This one allows exactly:
+#   * ONE source repository
+#   * ONE destination namespace (plus monitoring)
+#   * a whitelist of namespaced resource kinds
+#   * only the two cluster-scoped kinds this project genuinely needs
+# ==============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ivolve
+  namespace: argocd
+  # Without this finalizer, deleting the AppProject orphans its Applications,
+  # which then cannot be deleted cleanly.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: iVolve DevOps Roadmap — capstone application
+
+  # ----------------------------------------------------------------------------
+  # Permitted source repositories
+  # ----------------------------------------------------------------------------
+  # An explicit list, NOT '*'. With a wildcard, anyone who can create an
+  # Application in this project can make ArgoCD pull manifests from a repository
+  # they control and apply them to your cluster.
+  sourceRepos:
+    - https://github.com/WaleedDarwesh/CloudDevOpsProject.git
+
+  # ----------------------------------------------------------------------------
+  # Permitted destinations
+  # ----------------------------------------------------------------------------
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ivolve
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+
+  # ----------------------------------------------------------------------------
+  # Cluster-scoped resources
+  # ----------------------------------------------------------------------------
+  # A tight allowlist. Namespace and StorageClass are the only cluster-scoped
+  # objects this project creates (00-namespace.yaml and 03-storage.yaml).
+  #
+  # Note what is deliberately ABSENT: ClusterRole and ClusterRoleBinding. Those
+  # are the privilege-escalation path — an Application allowed to create a
+  # ClusterRoleBinding can bind cluster-admin to any ServiceAccount it likes.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: storage.k8s.io
+      kind: StorageClass
+
+  # ----------------------------------------------------------------------------
+  # Namespaced resources
+  # ----------------------------------------------------------------------------
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: policy
+      kind: PodDisruptionBudget
+    # Role and RoleBinding are namespaced, so their blast radius is one
+    # namespace — acceptable, unlike their cluster-scoped counterparts.
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+
+  # ----------------------------------------------------------------------------
+  # Orphaned resource monitoring
+  # ----------------------------------------------------------------------------
+  # Warns when a resource exists in the namespace but is not defined in Git —
+  # i.e. something was created by hand with kubectl. In a GitOps model that is
+  # configuration drift, and drift is what GitOps exists to eliminate.
+  orphanedResources:
+    warn: true
+
+  # ----------------------------------------------------------------------------
+  # RBAC within the project
+  # ----------------------------------------------------------------------------
+  roles:
+    - name: read-only
+      description: View application state without the ability to sync or modify
+      policies:
+        - p, proj:ivolve:read-only, applications, get, ivolve/*, allow
+      groups:
+        - ivolve-developers
+
+    - name: deployer
+      description: May trigger a sync, but not modify the Application definition
+      policies:
+        - p, proj:ivolve:deployer, applications, get, ivolve/*, allow
+        - p, proj:ivolve:deployer, applications, sync, ivolve/*, allow
+      groups:
+        - ivolve-operators
