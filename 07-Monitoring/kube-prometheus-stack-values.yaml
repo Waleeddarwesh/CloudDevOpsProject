@@ -1,0 +1,301 @@
+# ==============================================================================
+# kube-prometheus-stack — Helm values
+# ==============================================================================
+# One chart installs the entire observability stack:
+#
+#   Prometheus           time-series database + scrape engine
+#   Alertmanager         deduplicates, groups and routes alerts
+#   Grafana              dashboards
+#   node-exporter        DaemonSet — one pod per node, exposing host metrics
+#                        (CPU, memory, disk, network) — internship Lab 19
+#   kube-state-metrics   Deployment — exposes the STATE of Kubernetes objects
+#                        (replica counts, pod phase, PVC status)
+#   Prometheus Operator  manages Prometheus via CRDs (ServiceMonitor, Probe,
+#                        PrometheusRule) instead of a hand-edited config file
+#
+# ------------------------------------------------------------------------------
+# node-exporter vs kube-state-metrics — the distinction people miss
+# ------------------------------------------------------------------------------
+#   node-exporter       "this NODE is at 90% memory"        → infrastructure
+#   kube-state-metrics  "this DEPLOYMENT wants 3 replicas   → orchestration
+#                        but only has 1 ready"
+#
+# You need both. A node can be perfectly healthy while every pod on it is
+# CrashLoopBackOff, and vice versa.
+#
+# ------------------------------------------------------------------------------
+# Install
+# ------------------------------------------------------------------------------
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   kubectl create namespace monitoring
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring \
+#     --values 07-Monitoring/kube-prometheus-stack-values.yaml \
+#     --wait --timeout 10m
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Prometheus
+# ------------------------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    # --- Retention ---
+    # 15 days of history. retentionSize is the real safety net: without it,
+    # Prometheus happily fills the PVC and then crash-loops on a full disk,
+    # taking the monitoring system down exactly when it is needed most.
+    retention: 15d
+    retentionSize: 8GB
+
+    # --- Storage ---
+    # Prometheus MUST have persistent storage. The chart default is emptyDir,
+    # which means every restart discards all history — so the first thing you do
+    # after an incident is discover you have no data about it.
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ivolve-storage
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+
+    # --- Discovery scope ---
+    # `false` means "watch ALL ServiceMonitors in the cluster, regardless of
+    # their labels".
+    #
+    # The chart defaults to `true`, which restricts discovery to objects
+    # carrying release=monitoring. That default is the single most common reason
+    # a hand-written ServiceMonitor is silently never scraped — it is created
+    # successfully, appears in `kubectl get servicemonitor`, and Prometheus
+    # simply ignores it.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    # Global scrape settings.
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+
+    # Tag every sample with its origin. Essential once a second cluster exists —
+    # without it, metrics from two clusters are indistinguishable in Grafana.
+    externalLabels:
+      cluster: ivolve-dev-eks
+      environment: dev
+
+# ------------------------------------------------------------------------------
+# Alertmanager
+# ------------------------------------------------------------------------------
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ivolve-storage
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      # Group alerts by name and namespace so a node failure produces ONE
+      # notification listing 20 affected pods, not 20 separate pages.
+      group_by: ["alertname", "namespace"]
+      # Wait 30s for related alerts before sending the first notification.
+      group_wait: 30s
+      # Then 5 minutes before sending an update about the same group.
+      group_interval: 5m
+      # Re-notify about a still-firing alert every 4 hours.
+      repeat_interval: 4h
+      receiver: "default"
+
+      routes:
+        # Critical alerts bypass the grouping delay and repeat aggressively.
+        - matchers:
+            - severity = "critical"
+          receiver: "critical"
+          group_wait: 10s
+          repeat_interval: 1h
+
+    receivers:
+      - name: "default"
+        # No notifier configured — alerts are visible in the Alertmanager UI.
+        # Wire up Slack/email/PagerDuty for real use; see docs/MONITORING.md.
+
+      - name: "critical"
+        # Example Slack configuration (requires a webhook URL in a Secret):
+        # slack_configs:
+        #   - api_url_file: /etc/alertmanager/secrets/slack/url
+        #     channel: '#ivolve-alerts'
+        #     title: '{{ .CommonLabels.alertname }}'
+        #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+    # Suppress downstream noise. When a whole node is down, the individual pod
+    # alerts it causes are symptoms, not separate incidents.
+    inhibit_rules:
+      - source_matchers:
+          - severity = "critical"
+        target_matchers:
+          - severity = "warning"
+        # Only inhibit when both alerts concern the SAME object.
+        equal: ["alertname", "namespace"]
+
+# ------------------------------------------------------------------------------
+# Grafana
+# ------------------------------------------------------------------------------
+grafana:
+  enabled: true
+
+  # CHANGE THIS. The chart default is admin/prom-operator, which is public
+  # knowledge. Better still, supply it from a Secret:
+  #   admin:
+  #     existingSecret: grafana-admin
+  adminPassword: "CHANGE_ME_grafana_password"
+
+  persistence:
+    enabled: true
+    storageClassName: ivolve-storage
+    size: 5Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Access via port-forward by default — no public endpoint, nothing to secure.
+  #   kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
+  service:
+    type: ClusterIP
+
+  # To expose it through the ALB instead, uncomment and add TLS + auth:
+  # ingress:
+  #   enabled: true
+  #   ingressClassName: alb
+  #   annotations:
+  #     alb.ingress.kubernetes.io/scheme: internet-facing
+  #     alb.ingress.kubernetes.io/target-type: ip
+
+  # Auto-import dashboards from ConfigMaps labelled grafana_dashboard=1.
+  # This is what makes dashboards version-controlled rather than clicked
+  # together in the UI and lost on the next reinstall.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s:%(http_port)s/"
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+    users:
+      allow_sign_up: false
+
+# ------------------------------------------------------------------------------
+# node-exporter — internship Lab 19 (DaemonSet)
+# ------------------------------------------------------------------------------
+# A DaemonSet runs exactly ONE pod on EVERY node, automatically including nodes
+# added later by the autoscaler. That is precisely the right controller for a
+# per-host agent: a Deployment with 2 replicas could schedule both pods onto the
+# same node and leave the other unmonitored.
+nodeExporter:
+  enabled: true
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+
+  # Tolerate EVERY taint. Without this, a tainted node — such as the one
+  # dedicated to the database via workload=database:NoSchedule — silently gets
+  # no exporter, and its metrics vanish with no error anywhere.
+  tolerations:
+    - operator: Exists
+
+# ------------------------------------------------------------------------------
+# kube-state-metrics
+# ------------------------------------------------------------------------------
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  metricLabelsAllowlist:
+    # Exports pod labels as metric labels, so PromQL can filter by
+    # app.kubernetes.io/name — which is how the alert rules below target
+    # individual services.
+    - pods=[app.kubernetes.io/name,app.kubernetes.io/component]
+    - deployments=[app.kubernetes.io/name]
+
+# ------------------------------------------------------------------------------
+# EKS-specific exclusions
+# ------------------------------------------------------------------------------
+# On EKS the control plane is AWS-managed and its components are NOT reachable
+# from inside the cluster. The chart enables scrape targets for them by default,
+# which produces four permanently-firing "target down" alerts on every EKS
+# cluster — noise that trains people to ignore alerts.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  # kube-proxy DOES run on the worker nodes and is scrapeable.
+  enabled: true
+
+# The API server IS reachable and worth monitoring.
+kubeApiServer:
+  enabled: true
+
+kubelet:
+  enabled: true
+  serviceMonitor:
+    # cAdvisor provides per-container CPU/memory/network — the source of the
+    # container_* metrics used throughout the dashboards.
+    cAdvisor: true
+
+defaultRules:
+  create: true
+  rules:
+    # Disabled for the same reason as above: these evaluate metrics that do not
+    # exist on EKS and would fire permanently.
+    etcd: false
+    kubeScheduler: false
+    kubeControllerManager: false
