@@ -1,0 +1,44 @@
+# ==============================================================================
+# CODEOWNERS
+# ==============================================================================
+# GitHub automatically requests a review from the listed owner on any PR that
+# touches a matching path. Combined with a branch-protection rule requiring
+# code-owner approval, this is how a real organisation stops an unreviewed
+# change to production infrastructure.
+#
+# Later rules override earlier ones — most specific last.
+# ==============================================================================
+
+# Default owner for everything
+*                           @WaleedDarwesh
+
+# ------------------------------------------------------------------------------
+# Infrastructure — highest blast radius
+# ------------------------------------------------------------------------------
+# A mistake here can destroy the cluster or open the network. In a team this
+# would name the platform/SRE group.
+/02-Terraform/              @WaleedDarwesh
+/03-Ansible/                @WaleedDarwesh
+
+# ------------------------------------------------------------------------------
+# Security-sensitive paths
+# ------------------------------------------------------------------------------
+# In an organisation these would additionally require security-team approval.
+/02-Terraform/modules/eks/access.tf    @WaleedDarwesh
+/02-Terraform/modules/eks/irsa.tf      @WaleedDarwesh
+/04-Kubernetes/manifests/01-rbac.yaml  @WaleedDarwesh
+/04-Kubernetes/manifests/02-config.yaml            @WaleedDarwesh
+/04-Kubernetes/manifests/09-network-policies.yaml  @WaleedDarwesh
+/06-ArgoCD/project.yaml     @WaleedDarwesh
+/SECURITY.md                @WaleedDarwesh
+/.github/                   @WaleedDarwesh
+
+# ------------------------------------------------------------------------------
+# CI/CD — a change here affects every service
+# ------------------------------------------------------------------------------
+/05-Jenkins/vars/           @WaleedDarwesh
+
+# ------------------------------------------------------------------------------
+# Application source
+# ------------------------------------------------------------------------------
+/src/                       @WaleedDarwesh
