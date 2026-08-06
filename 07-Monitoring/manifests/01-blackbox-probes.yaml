@@ -1,0 +1,330 @@
+# ==============================================================================
+# Blackbox monitoring — synthetic HTTP probes
+# ==============================================================================
+# THE PROBLEM THIS SOLVES
+#
+# None of the three microservices expose Prometheus metrics. The upstream
+# application has no /metrics endpoint:
+#   * frontend        Express with no prom-client
+#   * auth-service    Flask with no prometheus_flask_exporter
+#   * roadmap-service Spring Boot WITHOUT spring-boot-starter-actuator
+#
+# A ServiceMonitor would therefore have nothing to scrape.
+#
+# ------------------------------------------------------------------------------
+# WHITE-BOX vs BLACK-BOX monitoring
+# ------------------------------------------------------------------------------
+#   White-box  the app reports on itself (/metrics): request rates, latency
+#              histograms, business counters, GC statistics.
+#              Requires modifying the application.
+#
+#   Black-box  an external prober makes real requests and measures what a USER
+#              would experience: is it up, how fast did it respond, was the
+#              status code correct.
+#              Requires NO application change.
+#
+# Black-box is used here because it works against the application exactly as
+# shipped — and because "can a user actually log in?" is a more direct question
+# than any internal counter. The two are complementary, not alternatives;
+# docs/MONITORING.md describes the white-box upgrade path.
+#
+# ------------------------------------------------------------------------------
+# Install the exporter first
+# ------------------------------------------------------------------------------
+#   helm install blackbox-exporter prometheus-community/prometheus-blackbox-exporter \
+#     --namespace monitoring
+# ==============================================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: ivolve-http-probes
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: ivolve-probes
+    app.kubernetes.io/part-of: ivolve
+spec:
+  # How often to probe each target.
+  interval: 60s
+  scrapeTimeout: 10s
+
+  # The blackbox-exporter module to use. `http_2xx` performs a GET and
+  # succeeds only on a 2xx response.
+  module: http_2xx
+
+  prober:
+    # Service address of the exporter installed above.
+    url: blackbox-exporter-prometheus-blackbox-exporter.monitoring.svc:9115
+    scheme: http
+    path: /probe
+
+  targets:
+    staticConfig:
+      static:
+        # Cluster-internal URLs. Probing these rather than the public ALB
+        # address isolates application health from load-balancer health — if the
+        # internal probe passes but users report errors, the problem is the ALB
+        # or DNS, not the app.
+        - http://frontend.ivolve.svc.cluster.local:80/
+        - http://auth-service.ivolve.svc.cluster.local:5000/health
+        - http://roadmap-service.ivolve.svc.cluster.local:8080/api/roadmap
+
+      labels:
+        # Attached to every resulting sample so alerts can be routed by team.
+        environment: dev
+        cluster: ivolve-dev-eks
+
+      relabelingConfigs:
+        # The raw `instance` label is the full URL, which is unreadable in a
+        # Grafana legend. Extract just the service name from the hostname.
+        - sourceLabels: [__param_target]
+          regex: "http://([^.]+)\\..*"
+          targetLabel: service
+          replacement: "$1"
+
+        - sourceLabels: [__param_target]
+          targetLabel: instance
+
+---
+# ==============================================================================
+# Alerting rules
+# ==============================================================================
+# A PrometheusRule is picked up by the Prometheus Operator and loaded into
+# Prometheus automatically — no config file editing and no reload.
+#
+# Every rule below has a `for:` duration. That is what separates an ALERT from
+# NOISE: `for: 5m` means the condition must hold continuously for five minutes.
+# Without it, a single failed scrape during a rolling update pages someone at
+# 3am about a service that was never actually down.
+# ==============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ivolve-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: ivolve-alerts
+    app.kubernetes.io/part-of: ivolve
+    # Matched by the ruleSelector in the Helm values.
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+
+    # --------------------------------------------------------------------------
+    # Availability — derived from the blackbox probes above
+    # --------------------------------------------------------------------------
+    - name: ivolve.availability
+      interval: 60s
+      rules:
+
+        - alert: IvolveServiceDown
+          # probe_success is 1 on a 2xx response, 0 otherwise.
+          expr: probe_success{service=~"frontend|auth-service|roadmap-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "{{ $labels.service }} is not responding"
+            description: >-
+              HTTP probes against {{ $labels.instance }} have failed for 2 minutes.
+              Users are likely affected.
+            runbook_url: "https://github.com/WaleedDarwesh/CloudDevOpsProject/blob/main/docs/RUNBOOK.md#service-down"
+
+        - alert: IvolveServiceSlow
+          # 95th percentile probe duration over 5 minutes.
+          expr: probe_duration_seconds{service=~"frontend|auth-service|roadmap-service"} > 2
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.service }} is responding slowly"
+            description: "{{ $labels.service }} took {{ $value | humanizeDuration }} to respond."
+
+    # --------------------------------------------------------------------------
+    # Workload health — from kube-state-metrics
+    # --------------------------------------------------------------------------
+    - name: ivolve.workloads
+      interval: 60s
+      rules:
+
+        - alert: IvolvePodCrashLooping
+          # A restart rate above zero over 15 minutes means the container is
+          # repeatedly dying. Rate-based rather than a raw restart count, so a
+          # pod that crashed once last week does not alert forever.
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="ivolve"}[15m]) * 60 * 15 > 3
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.pod }} has restarted more than
+              3 times in 15 minutes. Check: kubectl logs -n ivolve {{ $labels.pod }} --previous
+            runbook_url: "https://github.com/WaleedDarwesh/CloudDevOpsProject/blob/main/docs/RUNBOOK.md#crashloopbackoff"
+
+        - alert: IvolveDeploymentReplicasMismatch
+          expr: |
+            kube_deployment_spec_replicas{namespace="ivolve"}
+              != kube_deployment_status_replicas_available{namespace="ivolve"}
+          # 15 minutes, deliberately long: a rolling update legitimately creates
+          # this condition for a minute or two on every single deploy.
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} has unavailable replicas"
+            description: >-
+              {{ $labels.deployment }} wants {{ $value }} replicas but fewer are available.
+
+        - alert: IvolvePodNotReady
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_phase{namespace="ivolve", phase=~"Pending|Unknown"}
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} has been {{ $labels.phase }} for 10 minutes"
+            description: >-
+              Usually an unschedulable pod (insufficient resources, or a PVC that
+              cannot bind). Check: kubectl describe pod -n ivolve {{ $labels.pod }}
+
+    # --------------------------------------------------------------------------
+    # Database
+    # --------------------------------------------------------------------------
+    - name: ivolve.database
+      interval: 60s
+      rules:
+
+        - alert: IvolveMySQLDown
+          expr: |
+            kube_statefulset_status_replicas_ready{namespace="ivolve", statefulset="mysql"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "MySQL is down"
+            description: >-
+              The MySQL StatefulSet has no ready replicas. Login and signup are
+              broken; the roadmap page still works because roadmap-service is
+              stateless.
+            runbook_url: "https://github.com/WaleedDarwesh/CloudDevOpsProject/blob/main/docs/RUNBOOK.md#mysql-down"
+
+        - alert: IvolveDatabaseVolumeFillingUp
+          # Predicts, from the last 6 hours of growth, whether the volume runs
+          # out within 4 days. Predictive rather than threshold-based, because
+          # "85% full" is useless if it took two years to get there and
+          # catastrophic if it took two hours.
+          expr: |
+            predict_linear(
+              kubelet_volume_stats_available_bytes{namespace="ivolve", persistentvolumeclaim=~"data-mysql-.*"}[6h],
+              4 * 24 * 3600
+            ) < 0
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "MySQL volume will be full within 4 days"
+            description: >-
+              At the current growth rate {{ $labels.persistentvolumeclaim }} runs
+              out of space in under 4 days. Expand it — the StorageClass has
+              allowVolumeExpansion enabled.
+
+    # --------------------------------------------------------------------------
+    # Resource saturation
+    # --------------------------------------------------------------------------
+    - name: ivolve.resources
+      interval: 60s
+      rules:
+
+        - alert: IvolveContainerCPUThrottling
+          # CPU throttling is invisible in a "CPU usage" graph — a throttled
+          # container shows LOW usage precisely because the kernel is stopping
+          # it. It manifests to users as latency with no obvious cause, which is
+          # why this deserves its own alert.
+          expr: |
+            sum by (namespace, pod, container) (
+              rate(container_cpu_cfs_throttled_periods_total{namespace="ivolve"}[5m])
+            )
+            /
+            sum by (namespace, pod, container) (
+              rate(container_cpu_cfs_periods_total{namespace="ivolve"}[5m])
+            ) > 0.25
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.container }} is being CPU-throttled"
+            description: >-
+              {{ $labels.pod }}/{{ $labels.container }} is throttled for
+              {{ $value | humanizePercentage }} of its scheduling periods.
+              Raise the CPU limit.
+
+        - alert: IvolveContainerMemoryNearLimit
+          expr: |
+            container_memory_working_set_bytes{namespace="ivolve", container!=""}
+            /
+            container_spec_memory_limit_bytes{namespace="ivolve", container!=""} > 0.90
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.container }} is near its memory limit"
+            description: >-
+              {{ $labels.pod }}/{{ $labels.container }} is at
+              {{ $value | humanizePercentage }} of its limit and will be
+              OOM-killed if it grows further.
+
+    # --------------------------------------------------------------------------
+    # Nodes — from node-exporter (Lab 19)
+    # --------------------------------------------------------------------------
+    - name: ivolve.nodes
+      interval: 60s
+      rules:
+
+        - alert: IvolveNodeNotReady
+          expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.node }} is NotReady"
+            description: >-
+              With only 2 worker nodes, losing one halves cluster capacity and
+              may leave pods Pending.
+
+        - alert: IvolveNodeDiskPressure
+          expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.node }} is under disk pressure"
+            description: >-
+              The kubelet will start evicting pods and garbage-collecting images.
+              Usually caused by accumulated container images.
+
+        - alert: IvolveNodeHighMemory
+          expr: |
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.90
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.instance }} memory usage is above 90%"
+            description: "Available memory is {{ $value | humanizePercentage }} below the total."
