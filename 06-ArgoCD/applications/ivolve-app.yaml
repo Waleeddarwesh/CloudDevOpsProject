@@ -1,0 +1,175 @@
+# ==============================================================================
+# ArgoCD Application — continuous deployment of the iVolve stack
+# ==============================================================================
+# This single object is what turns the repository into the source of truth for
+# the cluster.
+#
+#   Jenkins pushes a manifest commit
+#            │
+#            ▼
+#   ArgoCD detects the new revision (webhook, or 3-minute poll)
+#            │
+#            ▼
+#   Compares Git (desired) against the cluster (live)
+#            │
+#            ▼
+#   Applies the difference — and keeps re-applying it
+#
+# Nothing else deploys. Jenkins has no cluster credentials for deployment, and
+# nobody runs `kubectl apply` by hand. The consequence is that the answer to
+# "what is running in production?" is always "whatever is in Git", which is the
+# entire value proposition.
+# ==============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ivolve-app
+  # MUST be the namespace ArgoCD itself runs in. An Application created anywhere
+  # else is simply ignored — no error, no event, it just never syncs.
+  namespace: argocd
+  finalizers:
+    # Cascading delete: removing this Application also removes the Kubernetes
+    # objects it created. Without the finalizer, `kubectl delete application`
+    # deletes only the Application record and orphans the entire running stack.
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    app.kubernetes.io/name: ivolve-app
+    app.kubernetes.io/part-of: ivolve
+spec:
+  # Binds this Application to the constrained AppProject in project.yaml.
+  project: ivolve
+
+  # ----------------------------------------------------------------------------
+  # Source — where the desired state lives
+  # ----------------------------------------------------------------------------
+  source:
+    repoURL: https://github.com/WaleedDarwesh/CloudDevOpsProject.git
+
+    # HEAD tracks the default branch. Alternatives:
+    #   'main'        equivalent, and more explicit
+    #   'v1.2.3'      pin to a tag — the right choice for production, where you
+    #                 want deploys to be a deliberate act rather than automatic
+    targetRevision: HEAD
+
+    # ArgoCD finds kustomization.yaml here and renders with Kustomize
+    # automatically — no plugin configuration required.
+    path: 04-Kubernetes/manifests
+
+  # ----------------------------------------------------------------------------
+  # Destination
+  # ----------------------------------------------------------------------------
+  destination:
+    # The in-cluster API endpoint. ArgoCD is deploying to the cluster it runs in.
+    server: https://kubernetes.default.svc
+    namespace: ivolve
+
+  # ----------------------------------------------------------------------------
+  # Sync policy
+  # ----------------------------------------------------------------------------
+  syncPolicy:
+    automated:
+      # prune: delete resources removed from Git.
+      #
+      # Without it, deleting a manifest leaves the object running in the cluster
+      # forever — Git and reality silently diverge, which is exactly the drift
+      # GitOps is supposed to prevent.
+      prune: true
+
+      # selfHeal: revert manual changes made with kubectl.
+      #
+      # Someone runs `kubectl scale deploy/frontend --replicas=10` during an
+      # incident; ArgoCD notices the drift and restores the Git value. This is
+      # the behaviour that makes Git authoritative rather than merely
+      # advisory — and it is also why an emergency manual change must be
+      # committed, not just applied.
+      selfHeal: true
+
+      # Do not prune during a rollback to a revision where a resource did not
+      # exist — that would delete it, then recreate it on the next sync.
+      allowEmpty: false
+
+    syncOptions:
+      # Create the namespace if absent. Belt and braces: 00-namespace.yaml
+      # already defines it, so this only matters on a first-ever sync.
+      - CreateNamespace=true
+
+      # Server-side apply. Sends the manifest to the API server, which merges it
+      # using field ownership rather than the client computing a 3-way patch
+      # from a last-applied-configuration annotation.
+      #
+      # This matters here specifically: a client-side apply on large CRDs
+      # exceeds the 256 KB annotation limit, and it fights with controllers that
+      # legitimately mutate fields (the HPA writing replicas, for example).
+      - ServerSideApply=true
+
+      # Sync each resource as soon as it is ready rather than waiting for the
+      # whole wave — faster, and it surfaces a single failing resource
+      # immediately.
+      - ApplyOutOfSyncOnly=true
+
+      # Prune in reverse dependency order on delete.
+      - PruneLast=true
+
+      # Treat a missing namespace during pruning as success rather than an error.
+      - RespectIgnoreDifferences=true
+
+    # --------------------------------------------------------------------------
+    # Retry with exponential backoff
+    # --------------------------------------------------------------------------
+    # A sync legitimately fails on the first attempt in normal operation — for
+    # example the Ingress is applied before the AWS Load Balancer Controller's
+    # webhook is ready. Without retry the Application sits Degraded until
+    # someone clicks Sync.
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        # 10s → 20s → 40s → 80s → 160s, capped at 3m.
+        maxDuration: 3m
+
+  # ----------------------------------------------------------------------------
+  # Ignored differences
+  # ----------------------------------------------------------------------------
+  # Fields that OTHER controllers own and legitimately mutate. Without these
+  # entries the Application flaps between Synced and OutOfSync forever, and with
+  # selfHeal enabled ArgoCD actively fights the controller — repeatedly
+  # resetting the replica count the HPA just changed.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      # The HPA owns spec.replicas on any Deployment it targets.
+      jsonPointers:
+        - /spec/replicas
+
+    # ServerSideApply records ownership metadata that changes on every apply and
+    # is not part of desired state.
+    - group: "*"
+      kind: "*"
+      managedFieldsManagers:
+        - kube-controller-manager
+
+  # ----------------------------------------------------------------------------
+  # Revision history
+  # ----------------------------------------------------------------------------
+  # Keeps 10 previous revisions for one-click rollback in the UI, or:
+  #     argocd app rollback ivolve-app <revision>
+  revisionHistoryLimit: 10
+
+  # ----------------------------------------------------------------------------
+  # Notes on sync waves
+  # ----------------------------------------------------------------------------
+  # Ordering is declared per-resource with the annotation
+  #   argocd.argoproj.io/sync-wave
+  # in 04-Kubernetes/manifests/. Lower numbers are applied and must become
+  # healthy first:
+  #
+  #   wave 1  MySQL StatefulSet     — the database must be up first
+  #   wave 2  auth-service, roadmap-service
+  #   wave 3  frontend              — only once both backends are healthy
+  #   wave 4  Ingress               — only once the frontend has endpoints
+  #
+  # Resources without the annotation default to wave 0 and are applied before
+  # everything else — which is correct for the Namespace, ConfigMap, Secret,
+  # StorageClass and RBAC objects they all depend on.
