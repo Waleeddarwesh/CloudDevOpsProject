@@ -79,7 +79,7 @@ backend.hcl
 zz_local_backend_override.tf
 
 # Saved plan files can contain sensitive values.
-# *.tfplan
+*.tfplan
 plan.out
 crash.log
 crash.*.log
