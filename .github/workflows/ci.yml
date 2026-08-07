@@ -46,7 +46,7 @@ jobs:
     name: Terraform
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -91,7 +91,7 @@ jobs:
     name: Terraform security (Checkov)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@master
@@ -113,7 +113,7 @@ jobs:
     name: Kubernetes manifests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: azure/setup-kubectl@v4
         with:
@@ -148,7 +148,7 @@ jobs:
     name: Kubernetes security (Trivy config)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Scan the manifests for misconfiguration
         uses: aquasecurity/trivy-action@master
@@ -166,7 +166,7 @@ jobs:
     name: Ansible
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -200,7 +200,7 @@ jobs:
       matrix:
         service: [frontend, auth-service, roadmap-service]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Lint src/${{ matrix.service }}/Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
@@ -215,7 +215,7 @@ jobs:
     name: Docker Compose
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate the Compose file
         run: |
@@ -233,7 +233,7 @@ jobs:
     name: Secret scanning (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history. A secret committed and then "removed" in a later
           # commit is still in the history and still compromised — scanning only
@@ -252,7 +252,7 @@ jobs:
     name: YAML lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
