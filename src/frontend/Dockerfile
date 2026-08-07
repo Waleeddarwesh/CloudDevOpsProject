@@ -66,7 +66,7 @@ EXPOSE 3000
 # Liveness signal for Docker Compose. Kubernetes ignores this and uses its own
 # httpGet probes (see 04-Kubernetes/manifests/), but it makes `docker compose up`
 # dependency ordering work correctly for local development.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=2 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
     CMD node -e "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["/sbin/tini", "--"]
