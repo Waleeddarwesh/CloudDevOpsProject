@@ -6,7 +6,7 @@
 # passed the Trivy gate and the build that reaches production.
 Flask==3.1.1
 mysql-connector-python==9.4.0
-bcrypt==4.3.0
+bcrypt==5.0.0
 
 # Production WSGI server. Flask's built-in server (app.run) is single-threaded
 # and explicitly documented as unsuitable for production; gunicorn serves the
