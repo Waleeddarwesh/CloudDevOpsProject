@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.80"
+      version = "~> 6.57"
     }
     # Used by data.tls_certificate in irsa.tf to read the OIDC issuer's
     # certificate thumbprint.
