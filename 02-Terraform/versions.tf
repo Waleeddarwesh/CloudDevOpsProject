@@ -18,7 +18,7 @@ terraform {
       # ~> 5.80 means ">= 5.80.0, < 6.0.0" — patch and minor upgrades are
       # allowed (bug fixes, new resources), but a breaking 6.x release cannot
       # be pulled in silently.
-      version = "~> 5.80"
+      version = "~> 6.57"
     }
 
     # Reads the EKS OIDC issuer's TLS certificate so its SHA-1 thumbprint can be
