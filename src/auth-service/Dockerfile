@@ -71,7 +71,7 @@ USER appuser
 
 EXPOSE 5000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
     CMD curl --fail --silent http://127.0.0.1:5000/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
