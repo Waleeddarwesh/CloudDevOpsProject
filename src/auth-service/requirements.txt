@@ -5,7 +5,7 @@
 # without it, a transitive upgrade can change behaviour between the build that
 # passed the Trivy gate and the build that reaches production.
 Flask==3.1.1
-mysql-connector-python==9.4.0
+mysql-connector-python==26.7.0
 bcrypt==4.3.0
 
 # Production WSGI server. Flask's built-in server (app.run) is single-threaded
