@@ -65,7 +65,7 @@ EXPOSE 8080
 #                        low-concurrency service; G1's region tables are wasted here.
 #   +ExitOnOutOfMemoryError  fail fast so Kubernetes restarts the pod instead of
 #                        leaving a wedged JVM thrashing the collector forever.
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=50.0 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=5 \
     CMD curl --fail --silent http://127.0.0.1:8080/api/roadmap || exit 1
