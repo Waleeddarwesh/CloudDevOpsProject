@@ -45,7 +45,7 @@ metadata:
     app.kubernetes.io/part-of: ivolve
 spec:
   # How often to probe each target.
-  interval: 60s
+  interval: 30s
   scrapeTimeout: 10s
 
   # The blackbox-exporter module to use. `http_2xx` performs a GET and
@@ -115,7 +115,7 @@ spec:
     # Availability — derived from the blackbox probes above
     # --------------------------------------------------------------------------
     - name: ivolve.availability
-      interval: 60s
+      interval: 30s
       rules:
 
         - alert: IvolveServiceDown
@@ -147,7 +147,7 @@ spec:
     # Workload health — from kube-state-metrics
     # --------------------------------------------------------------------------
     - name: ivolve.workloads
-      interval: 60s
+      interval: 30s
       rules:
 
         - alert: IvolvePodCrashLooping
@@ -201,7 +201,7 @@ spec:
     # Database
     # --------------------------------------------------------------------------
     - name: ivolve.database
-      interval: 60s
+      interval: 30s
       rules:
 
         - alert: IvolveMySQLDown
@@ -244,7 +244,7 @@ spec:
     # Resource saturation
     # --------------------------------------------------------------------------
     - name: ivolve.resources
-      interval: 60s
+      interval: 30s
       rules:
 
         - alert: IvolveContainerCPUThrottling
@@ -291,7 +291,7 @@ spec:
     # Nodes — from node-exporter (Lab 19)
     # --------------------------------------------------------------------------
     - name: ivolve.nodes
-      interval: 60s
+      interval: 30s
       rules:
 
         - alert: IvolveNodeNotReady
