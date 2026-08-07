@@ -34,7 +34,7 @@ RUN mvn -B clean package -DskipTests
 # ------------------------------------------------------------------------------
 # Stage 2 — runtime
 # ------------------------------------------------------------------------------
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM eclipse-temurin:25-jre-alpine AS runtime
 
 LABEL org.opencontainers.image.title="ivolve-roadmap-service" \
       org.opencontainers.image.description="iVolve DevOps Roadmap — roadmap API (Spring Boot)" \
