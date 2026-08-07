@@ -22,7 +22,7 @@ def validate_config():
 
 def get_connection():
     validate_config()
-    return mysql.connector.connect(**DB_CONFIG, connection_timeout=3)
+    return mysql.connector.connect(**DB_CONFIG, connection_timeout=5)
 
 def ensure_database_ready():
     conn = None
