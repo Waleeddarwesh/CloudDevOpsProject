@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Stage 1 — dependency resolution
 # ------------------------------------------------------------------------------
-FROM node:22-alpine AS deps
+FROM node:25-alpine AS deps
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ RUN npm install --omit=dev --no-audit --no-fund
 # ------------------------------------------------------------------------------
 # Stage 2 — runtime
 # ------------------------------------------------------------------------------
-FROM node:22-alpine AS runtime
+FROM node:25-alpine AS runtime
 
 # Container metadata (OCI standard labels) — surfaces in `docker inspect`,
 # in ECR, and in vulnerability-scanner reports.
