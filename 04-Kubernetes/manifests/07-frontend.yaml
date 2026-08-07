@@ -30,7 +30,7 @@ metadata:
     # during a deploy.
     argocd.argoproj.io/sync-wave: "3"
 spec:
-  replicas: 1
+  replicas: 2
   revisionHistoryLimit: 3
   progressDeadlineSeconds: 300
 
