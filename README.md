@@ -403,10 +403,11 @@ Beyond the brief, these are the changes that separate a lab exercise from a syst
 
 | Area | Enhancement | Why It Matters |
 |---|---|---|
-| 🔐 **Identity** | IAM instance profile + **IRSA**, zero static keys | A leaked `AKIA…` key is the usual path from CI compromise to account compromise |
-| 🔐 **Metadata** | **IMDSv2 enforced** (`http_tokens = required`) | Blocks SSRF-based credential theft |
-| 🔐 **Secrets** | KMS envelope encryption of etcd Secrets; Ansible Vault; documented Sealed Secrets / ESO paths | Base64 is encoding, not encryption |
-| 🔐 **Network** | Public + private **NACLs**, VPC **flow logs**, default-deny **NetworkPolicy** | Defence in depth; flow logs are the only way to debug a silent drop |
+| 🛡️ **Identity** | IAM instance profile + **IRSA**, zero static keys | A leaked `AKIA…` key is the usual path from CI compromise to account compromise |
+| 🛡️ **Metadata** | **IMDSv2 enforced** (`http_tokens = required`) | Blocks SSRF-based credential theft |
+| 🛡️ **Secrets** | KMS envelope encryption of etcd Secrets; Ansible Vault; documented Sealed Secrets / ESO paths | Base64 is encoding, not encryption |
+| 🔒 **TLS** | **ALB + ACM integration** for `*.craft-egy.com` | Full HTTPS termination at the edge with automated certificate validation |
+| 🛡️ **Network** | Public + private **NACLs**, VPC **flow logs**, default-deny **NetworkPolicy** | Defence in depth; flow logs are the only way to debug a silent drop |
 | 🔐 **Pods** | **Pod Security Standard `restricted`**, non-root, `readOnlyRootFilesystem`, all capabilities dropped | Non-compliant pods are *rejected at admission* |
 | 🔐 **Registry** | **Immutable ECR tags** + lifecycle policy | A tag that can be overwritten makes rollback a lie |
 | 🛡️ **CI gates** | Trivy (blocking), SonarQube quality gate, Checkov, Gitleaks, hadolint | Shift-left, enforced rather than advisory |

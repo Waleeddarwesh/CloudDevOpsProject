@@ -55,7 +55,7 @@ Component design, data flow, network topology, and the reasoning behind each sig
 │  │  └────────────────────────────────────────────────────────────────┘ │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 │                                                                           │
-│   ECR (3 repos)    S3 (tfstate)    KMS    CloudWatch Logs                  │
+│   ECR (3 repos)    S3 (tfstate)    KMS    CloudWatch Logs                 │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -203,7 +203,7 @@ developer         Jenkins            ECR         Git         ArgoCD      cluster
     ├───────────────►│                │           │             │           │
     │                │ test·sonar     │           │             │           │
     │                │ build          │           │             │           │
-    │                │ TRIVY GATE ⛔  │           │             │           │
+    │                │ TRIVY GATE     │           │             │           │
     │                │ push ─────────►│           │             │           │
     │                │ kustomize edit │           │             │           │
     │                │ git commit ────┼──────────►│             │           │
@@ -316,10 +316,6 @@ One replica, no replication, no automated backup. A node failure means downtime 
 
 `02-config.yaml` ships **deliberate placeholders**. See [SECURITY.md](SECURITY.md) for the Sealed Secrets and External Secrets Operator paths.
 
-### 4. No TLS on the ALB
-
-HTTP only. TLS requires a domain and an ACM certificate; the annotations are present and commented in `08-ingress.yaml`.
-
 ### 5. No application metrics
 
 No `/metrics` endpoint on any service. Black-box probes cover availability and latency but not request rates or error rates by route.
@@ -402,15 +398,14 @@ The upstream application ships no tests. `runUnitTests.groovy` runs them if pres
 Ordered by value:
 
 1. **Shared session store (Redis)** — removes the stickiness workaround and the multi-replica login bug.
-2. **TLS via ACM + Route 53** — annotations already present, commented.
-3. **MySQL operator or RDS Multi-AZ** — removes the single point of failure.
-4. **External Secrets Operator** — removes secrets from Git entirely.
-5. **Application metrics** — Actuator / prom-client / prometheus_flask_exporter.
-6. **Automated EBS snapshots** — via the CSI `VolumeSnapshot` API.
-7. **Multi-AZ NAT** — one flag: `single_nat_gateway = false`.
-8. **Progressive delivery** — Argo Rollouts for canary releases.
-9. **Centralised logging** — Loki or OpenSearch; only metrics are collected today.
-10. **Image signing** — Cosign + an admission policy requiring signatures.
+2. **MySQL operator or RDS Multi-AZ** — removes the single point of failure.
+3. **External Secrets Operator** — removes secrets from Git entirely.
+4. **Application metrics** — Actuator / prom-client / prometheus_flask_exporter.
+5. **Automated EBS snapshots** — via the CSI `VolumeSnapshot` API.
+6. **Multi-AZ NAT** — one flag: `single_nat_gateway = false`.
+7. **Progressive delivery** — Argo Rollouts for canary releases.
+8. **Centralised logging** — Loki or OpenSearch; only metrics are collected today.
+9. **Image signing** — Cosign + an admission policy requiring signatures.
 
 ---
 
