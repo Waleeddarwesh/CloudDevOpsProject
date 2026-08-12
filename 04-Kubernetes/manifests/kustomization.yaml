@@ -69,16 +69,16 @@ namespace: ivolve
 # ------------------------------------------------------------------------------
 images:
   - name: ivolve-frontend
-    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ivolve-frontend
-    newTag: dev
+    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-frontend
+    newTag: latest
 
   - name: ivolve-auth-service
-    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ivolve-auth-service
-    newTag: dev
+    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-auth-service
+    newTag: latest
 
   - name: ivolve-roadmap-service
-    newName: 123456789012.dkr.ecr.us-east-1.amazonaws.com/ivolve-roadmap-service
-    newTag: dev
+    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-roadmap-service
+    newTag: latest
 
 # ------------------------------------------------------------------------------
 # Common labels

@@ -25,7 +25,7 @@ metadata:
     # Applied after the database (wave 1).
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  replicas: 2
+  replicas: 1
 
   # Keep the last 3 ReplicaSets so `kubectl rollout undo` has something to roll
   # back to. The default of 10 clutters the namespace with dead ReplicaSets.
@@ -132,7 +132,7 @@ spec:
           resources:
             requests:
               cpu: 10m
-              memory: 16Mi
+              memory: 32Mi
             limits:
               cpu: 50m
               memory: 32Mi

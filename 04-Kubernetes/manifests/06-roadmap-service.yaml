@@ -32,7 +32,7 @@ metadata:
     # database dependency so it could equally be wave 1.
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  replicas: 2
+  replicas: 1
   revisionHistoryLimit: 3
   # Longer than the other services: the JVM plus Spring context startup is slow,
   # so a rollout legitimately takes longer before pods report Ready.
