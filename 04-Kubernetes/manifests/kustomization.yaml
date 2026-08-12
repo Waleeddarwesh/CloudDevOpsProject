@@ -50,7 +50,7 @@ resources:
   - 07-frontend.yaml         # Deployment, Service, NodePort, HPA, PDB
   - 08-ingress.yaml          # ALB Ingress
   - 09-jenkins.yaml          # Jenkins Proxy and Ingress
-  - 09-network-policies.yaml # Pod-level firewall rules
+  - 10-network-policies.yaml # Pod-level firewall rules
 
 # ------------------------------------------------------------------------------
 # Namespace
