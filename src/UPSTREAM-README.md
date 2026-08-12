@@ -52,7 +52,7 @@ The application follows a microservices architecture consisting of:
                          ▼                     ▼
                 ┌─────────────────┐   ┌──────────────────┐
                 │   Auth Service  │   │ Roadmap Service  │
-                │      Java       │   │     Python       │
+                │    Python       │   │     Java         │
                 └────────┬────────┘   └──────────────────┘
                          │                      
                          │                      
@@ -68,11 +68,11 @@ The application follows a microservices architecture consisting of:
 
 The project contains three application microservices.
 
-| Service         | Technology              | Responsibility                                   |
-| --------------- | ------------------------ | ----------------------------------------------- |
-| Frontend        | Node.js / Express / EJS  | Web UI and communication with backend services  |
-| Auth Service    | Java                      | User registration and authentication           |
-| Roadmap Service | Python                    | DevOps roadmap/application data                |
+| Service         | Technology               | Responsibility                                 |
+| --------------- | ------------------------ | ---------------------------------------------- |
+| Frontend        | Node.js / Express / EJS  | Web UI and communication with backend services |
+| Auth Service    | Python                   | User registration and authentication           |
+| Roadmap Service | Java                     | DevOps roadmap/application data                |
 
 The databases are external dependencies of the microservices.
 
@@ -222,7 +222,7 @@ The Auth Service requires database connection information.
 DB_HOST=<MYSQL_HOST>
 DB_PORT=<MYSQL_PORT>
 DB_NAME=<MYSQL_DATABASE>
-DB_USERNAME=<MYSQL_USERNAME>
+DB_USER=<MYSQL_USERNAME>
 DB_PASSWORD=<MYSQL_PASSWORD>
 ```
 
@@ -232,7 +232,7 @@ Example:
 DB_HOST=mysql
 DB_PORT=3306
 DB_NAME=ivolve
-DB_USERNAME=ibrahim
+DB_USER=ibrahim
 DB_PASSWORD=pass@123
 ```
 

@@ -16,18 +16,18 @@ A module is a reusable, parameterised package of resources. Without modules ever
 
 ```text
    Monolithic                          Modular (used here)
-┌────────────────────────┐      ┌────────────────────────────────┐
-│ main.tf   (900 lines)  │      │ main.tf  (120 lines)           │
-│  aws_vpc               │      │   module "network" { … }       │
-│  aws_subnet × 4        │      │   module "server"  { … }       │
-│  aws_nat_gateway       │      │   module "eks"     { … }       │
-│  aws_instance          │      │   module "ecr"     { … }       │
-│  aws_eks_cluster       │      │                                │
-│  aws_iam_role × 6      │      │ modules/network/  ← self-contained
-│  …                     │      │ modules/server/   ← testable
-│                        │      │ modules/eks/      ← reusable
-│ unreviewable           │      │ modules/ecr/      ← composable
-│ un-reusable            │      └────────────────────────────────┘
+┌────────────────────────┐      ┌────────────────────────────────────┐
+│ main.tf   (900 lines)  │      │ main.tf  (120 lines)               │
+│  aws_vpc               │      │   module "network" { … }           │
+│  aws_subnet × 4        │      │   module "server"  { … }           │
+│  aws_nat_gateway       │      │   module "eks"     { … }           │
+│  aws_instance          │      │   module "ecr"     { … }           │
+│  aws_eks_cluster       │      │                                    │
+│  aws_iam_role × 6      │      │ modules/network/  ← self-contained │
+│  …                     │      │ modules/server/   ← testable       │
+│                        │      │ modules/eks/      ← reusable       │
+│ unreviewable           │      │ modules/ecr/      ← composable     │
+│ un-reusable            │      └────────────────────────────────────┘
 └────────────────────────┘
 ```
 

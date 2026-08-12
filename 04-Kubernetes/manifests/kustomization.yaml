@@ -69,6 +69,18 @@ namespace: ivolve
 # Replace 123456789012 with your account ID, or let the pipeline do it:
 #     terraform -chdir=02-Terraform output -raw ecr_registry
 # ------------------------------------------------------------------------------
+images:
+  - name: ivolve-frontend
+    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-frontend
+    newTag: latest
+
+  - name: ivolve-auth-service
+    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-auth-service
+    newTag: latest
+
+  - name: ivolve-roadmap-service
+    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-roadmap-service
+    newTag: latest
 
 # ------------------------------------------------------------------------------
 # Common labels

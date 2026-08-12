@@ -203,7 +203,7 @@ grafana:
       alb.ingress.kubernetes.io/ssl-redirect: "443"
       alb.ingress.kubernetes.io/group.name: ivolve-dev-alb
       alb.ingress.kubernetes.io/conditions.prometheus-grafana: >-
-        [{"field":"source-ip","sourceIpConfig":{"values":["217.54.65.216/32"]}}]
+        [{"field":"http-header","httpHeaderConfig":{"httpHeaderName":"CF-Connecting-IP","values":["217.54.65.216"]}}]
     hosts:
       - grafana.craft-egy.com
 
