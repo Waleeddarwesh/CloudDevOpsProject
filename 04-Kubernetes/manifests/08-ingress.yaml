@@ -66,14 +66,11 @@ metadata:
     # --------------------------------------------------------------------------
     # Listeners
     # --------------------------------------------------------------------------
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
-
-    # --- TLS (uncomment once you own a domain and an ACM certificate) ---
-    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/xxxx
-    # alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
-    # # Permanent redirect of all plaintext traffic to HTTPS.
-    # alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:991216470475:certificate/4d56b9b2-a38b-4b43-9520-05811d127705
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    # Permanent redirect of all plaintext traffic to HTTPS.
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
 
     # --------------------------------------------------------------------------
     # Health checks
