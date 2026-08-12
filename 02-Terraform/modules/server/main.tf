@@ -110,6 +110,23 @@ resource "aws_vpc_security_group_ingress_rule" "jenkins_ui" {
   tags = merge(var.tags, { Name = "${var.name_prefix}-ui-${count.index}" })
 }
 
+# --- Ingress: ALB ---
+data "aws_vpc" "selected" {
+  id = var.vpc_id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "jenkins_alb" {
+  security_group_id = aws_security_group.jenkins.id
+  description       = "Jenkins UI from internal ALB (VPC)"
+
+  cidr_ipv4   = data.aws_vpc.selected.cidr_block
+  ip_protocol = "tcp"
+  from_port   = 8080
+  to_port     = 8080
+
+  tags = merge(var.tags, { Name = "${var.name_prefix}-ui-alb" })
+}
+
 # --- Ingress: SonarQube ---
 resource "aws_vpc_security_group_ingress_rule" "sonarqube" {
   # Reuses the Jenkins UI allowlist: whoever may administer Jenkins is also the

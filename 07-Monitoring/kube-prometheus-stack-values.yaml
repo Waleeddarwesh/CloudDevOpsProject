@@ -191,12 +191,21 @@ grafana:
     type: ClusterIP
 
   # To expose it through the ALB instead, uncomment and add TLS + auth:
-  # ingress:
-  #   enabled: true
-  #   ingressClassName: alb
-  #   annotations:
-  #     alb.ingress.kubernetes.io/scheme: internet-facing
-  #     alb.ingress.kubernetes.io/target-type: ip
+  ingress:
+    enabled: true
+    ingressClassName: alb
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:991216470475:certificate/4d56b9b2-a38b-4b43-9520-05811d127705
+      alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      alb.ingress.kubernetes.io/group.name: ivolve-dev-alb
+      alb.ingress.kubernetes.io/conditions.prometheus-grafana: >-
+        [{"field":"source-ip","sourceIpConfig":{"values":["217.54.65.216/32"]}}]
+    hosts:
+      - grafana.craft-egy.com
 
   # Auto-import dashboards from ConfigMaps labelled grafana_dashboard=1.
   # This is what makes dashboards version-controlled rather than clicked
