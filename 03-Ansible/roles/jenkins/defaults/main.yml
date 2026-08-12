@@ -3,7 +3,7 @@
 # every 12 weeks. The weekly line ships new features faster but breaks plugins
 # more often; a CI server should not be on it.
 jenkins_repo_url: https://pkg.jenkins.io/debian-stable
-jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
 
 jenkins_plugin_manager_url: >-
   https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/2.13.2/jenkins-plugin-manager-2.13.2.jar

@@ -230,6 +230,13 @@ data "aws_iam_policy_document" "eks" {
       "arn:aws:eks:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/${var.eks_cluster_name}"
     ]
   }
+
+  statement {
+    sid       = "Ec2Describe"
+    effect    = "Allow"
+    actions   = ["ec2:DescribeInstances"]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "eks" {

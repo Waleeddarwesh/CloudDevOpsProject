@@ -27,7 +27,7 @@ aws_region: us-east-1
 
 # Jenkins requires Java 17 or 21. 17 is the long-term-support baseline that the
 # widest range of plugins is tested against.
-java_version: 17
+java_version: 21
 
 # Trivy is installed from the Aqua Security APT repository so `apt upgrade`
 # keeps it current, rather than pinning a .deb URL that goes stale.

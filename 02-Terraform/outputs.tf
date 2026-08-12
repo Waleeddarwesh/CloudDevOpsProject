@@ -135,3 +135,20 @@ output "next_steps" {
 
   EOT
 }
+
+output "acm_certificate_arn" {
+  description = "The ARN of the ACM certificate to use in Kubernetes Ingress annotations"
+  value       = aws_acm_certificate.alb_cert.arn
+}
+
+output "acm_certificate_validation_records" {
+  description = "DNS records to add to Cloudflare to validate the ACM certificate"
+  value = {
+    for dvo in aws_acm_certificate.alb_cert.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+}
+

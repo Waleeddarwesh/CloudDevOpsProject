@@ -232,7 +232,7 @@ resource "aws_iam_role_policy_attachment" "node_ssm" {
 
 resource "aws_eks_node_group" "this" {
   cluster_name    = aws_eks_cluster.this.name
-  node_group_name = "${var.cluster_name}-nodes"
+  node_group_name = "${var.cluster_name}-ng-v2"
   node_role_arn   = aws_iam_role.node.arn
 
   # Passing BOTH private subnets is what satisfies the project requirement that
