@@ -275,14 +275,12 @@ sh '''
 
 # 📋 Steps
 
-## 1. Complete the Jenkins setup wizard
+## 1. Log in to Jenkins
 
-```bash
-ssh -i ~/.ssh/ivolve-key.pem ubuntu@<JENKINS_IP> \
-  'sudo cat /var/lib/jenkins/secrets/initialAdminPassword'
-```
+Open `http://<JENKINS_IP>:8080` in your browser. The Ansible playbook uses Jenkins Configuration as Code (JCasC) to bypass the setup wizard and automatically provision the admin user.
 
-Open `http://<JENKINS_IP>:8080`, unlock, and create your admin user. Plugins are already installed by the [Ansible jenkins role](../03-Ansible/roles/jenkins/) — choose **Select plugins to install → None**.
+- **Username:** `admin`
+- **Password:** `admin`
 
 ---
 

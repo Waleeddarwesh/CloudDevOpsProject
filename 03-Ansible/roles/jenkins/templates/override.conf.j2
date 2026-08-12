@@ -15,6 +15,7 @@
 
 Environment="JAVA_OPTS=-Xms{{ jenkins_java_initial_heap }} -Xmx{{ jenkins_java_heap }} {{ jenkins_java_opts | join(' ') }}"
 Environment="JENKINS_PORT={{ jenkins_http_port }}"
+Environment="CASC_JENKINS_CONFIG={{ jenkins_home }}/jenkins.yaml"
 
 # --- Resource limits ---
 # Jenkins plus its plugins keep thousands of files open. The systemd default of

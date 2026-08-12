@@ -444,15 +444,11 @@ make argo-ui             # → https://localhost:8080
 
 ## ⚙️ Stage 6 — CI pipelines
 
-### 6.1 Unlock Jenkins
+### 6.1 Log in to Jenkins
 
-```bash
-JENKINS_IP=$(terraform -chdir=02-Terraform output -raw jenkins_public_ip)
-ssh -i ~/.ssh/ivolve-key.pem ubuntu@$JENKINS_IP \
-  'sudo cat /var/lib/jenkins/secrets/initialAdminPassword'
-```
-
-Open `http://$JENKINS_IP:8080`. Choose **Select plugins to install → None** — Ansible already installed them.
+Open `http://$JENKINS_IP:8080`. The Ansible playbook uses Jenkins Configuration as Code (JCasC) to bypass the setup wizard and automatically provision the admin user.
+- **Username:** `admin`
+- **Password:** `admin`
 
 ### 6.2 Credentials
 

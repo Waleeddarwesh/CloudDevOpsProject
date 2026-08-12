@@ -45,3 +45,7 @@ jenkins_java_opts:
 
 # Overridden from group_vars/all/main.yml.
 jenkins_plugins: []
+
+# --- Jenkins Admin Credentials ---
+jenkins_admin_user: "admin"
+jenkins_admin_password: "admin"

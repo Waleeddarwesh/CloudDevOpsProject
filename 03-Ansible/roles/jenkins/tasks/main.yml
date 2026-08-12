@@ -71,6 +71,16 @@
     - Reload systemd
     - Restart jenkins
 
+- name: Deploy Jenkins Configuration as Code (JCasC)
+  ansible.builtin.template:
+    src: jenkins.yaml.j2
+    dest: "{{ jenkins_home }}/jenkins.yaml"
+    owner: jenkins
+    group: jenkins
+    mode: "0600"
+  notify: Restart jenkins
+
+
 # ------------------------------------------------------------------------------
 # Group membership
 # ------------------------------------------------------------------------------
