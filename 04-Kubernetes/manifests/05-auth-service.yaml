@@ -379,6 +379,7 @@ spec:
   # Using minAvailable: 1 rather than maxUnavailable: 1 is deliberate — with
   # maxUnavailable the budget scales with replica count, so at 6 replicas the
   # HPA could allow 5 to be evicted simultaneously.
+  replicas: 1
   minAvailable: 1
   selector:
     matchLabels:
