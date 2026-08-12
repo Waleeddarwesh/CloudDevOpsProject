@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/group.name: ivolve-dev-alb
+    alb.ingress.kubernetes.io/backend-protocol: HTTPS
+    # ArgoCD server uses HTTPS by default, so we must tell ALB to speak HTTPS to the pod
+spec:
+  ingressClassName: alb
+  rules:
+    - host: argocd.craft-egy.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argocd-server
+                port:
+                  name: https

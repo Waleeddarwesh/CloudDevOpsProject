@@ -110,7 +110,7 @@ metadata:
     # --------------------------------------------------------------------------
     # Operational
     # --------------------------------------------------------------------------
-    alb.ingress.kubernetes.io/load-balancer-name: ivolve-dev-alb
+    alb.ingress.kubernetes.io/group.name: ivolve-dev-alb
     alb.ingress.kubernetes.io/tags: >-
       Project=CloudDevOpsProject,Environment=dev,ManagedBy=Kubernetes
 
@@ -141,7 +141,8 @@ spec:
     # Once a real domain exists, add:
     #   - host: ivolve.example.com
     # and point a Route 53 alias record at the ALB.
-    - http:
+    - host: app.craft-egy.com
+      http:
         paths:
           - path: /
             # Prefix matches / and everything beneath it. `Exact` would match
