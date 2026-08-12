@@ -8,6 +8,7 @@ data:
     server {
         listen 8080;
         location = / {
+            port_in_redirect off;
             return 301 https://$host/login;
         }
         location / {
