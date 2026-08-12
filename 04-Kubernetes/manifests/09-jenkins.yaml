@@ -7,6 +7,9 @@ data:
   default.conf: |
     server {
         listen 8080;
+        location = / {
+            return 301 /login;
+        }
         location / {
             proxy_pass http://10.0.1.173:8080;
             proxy_set_header Host $host;
@@ -44,6 +47,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
           ports:
             - containerPort: 8080
           volumeMounts:
@@ -80,6 +90,8 @@ metadata:
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:991216470475:certificate/4d56b9b2-a38b-4b43-9520-05811d127705
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
     alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/healthcheck-path: "/login"
+    alb.ingress.kubernetes.io/success-codes: "200-403"
     alb.ingress.kubernetes.io/conditions.jenkins-external: >-
       [{"field":"http-header","httpHeaderConfig":{"httpHeaderName":"CF-Connecting-IP","values":["217.54.65.216"]}}]
 spec:
