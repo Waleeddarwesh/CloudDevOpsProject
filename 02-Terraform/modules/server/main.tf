@@ -127,6 +127,35 @@ resource "aws_vpc_security_group_ingress_rule" "sonarqube" {
   tags = merge(var.tags, { Name = "${var.name_prefix}-sonar-${count.index}" })
 }
 
+# --- Ingress: GitHub Webhooks ---
+data "http" "github_meta" {
+  url = "https://api.github.com/meta"
+  request_headers = {
+    Accept = "application/json"
+  }
+}
+
+locals {
+  github_webhook_ipv4 = [
+    for cidr in jsondecode(data.http.github_meta.response_body).hooks : cidr
+    if can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$", cidr))
+  ]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "github_webhooks" {
+  count = length(local.github_webhook_ipv4)
+
+  security_group_id = aws_security_group.jenkins.id
+  description       = "GitHub Webhook from ${local.github_webhook_ipv4[count.index]}"
+
+  cidr_ipv4   = local.github_webhook_ipv4[count.index]
+  ip_protocol = "tcp"
+  from_port   = 8080
+  to_port     = 8080
+
+  tags = merge(var.tags, { Name = "${var.name_prefix}-github-webhook-${count.index}" })
+}
+
 # --- Egress ---
 # Unrestricted outbound. Jenkins must reach GitHub, Docker Hub, Maven Central,
 # npm, PyPI, the Trivy vulnerability database and the AWS APIs — an allowlist of
