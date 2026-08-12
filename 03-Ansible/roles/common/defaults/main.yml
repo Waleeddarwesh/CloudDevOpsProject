@@ -40,6 +40,7 @@ common_packages:
   - dnsutils                 # dig/nslookup, for debugging service discovery
   - tree
   - vim
+  - systemd-timesyncd
 
 # IANA timezone name. Africa/Cairo matches the internship's local timezone, so
 # build timestamps line up with the working day.

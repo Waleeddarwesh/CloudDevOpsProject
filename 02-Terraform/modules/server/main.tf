@@ -63,7 +63,7 @@ data "aws_ami" "ubuntu" {
 
 resource "aws_security_group" "jenkins" {
   name        = "${var.name_prefix}-jenkins-sg"
-  description = "Jenkins CI server — SSH, web UI, and SonarQube access"
+  description = "Jenkins CI server - SSH, web UI, and SonarQube access"
   vpc_id      = var.vpc_id
 
   tags = merge(var.tags, {

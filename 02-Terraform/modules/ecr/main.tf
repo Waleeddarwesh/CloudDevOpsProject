@@ -88,7 +88,7 @@ resource "aws_ecr_lifecycle_policy" "this" {
         selection = {
           tagStatus = "tagged"
           # Matches the pipeline's <buildNumber>-<gitSha> tag format.
-          tagPrefixList = ["v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+          tagPrefixList = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
           countType     = "imageCountMoreThan"
           countNumber   = var.image_retention_count
         }

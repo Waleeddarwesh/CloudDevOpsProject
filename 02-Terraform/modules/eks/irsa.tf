@@ -96,7 +96,7 @@ data "aws_iam_policy_document" "ebs_csi_assume_role" {
 
 resource "aws_iam_role" "ebs_csi" {
   name               = "${var.cluster_name}-ebs-csi-irsa"
-  description        = "IRSA role for the EBS CSI driver — provisions PersistentVolumes"
+  description        = "IRSA role for the EBS CSI driver - provisions PersistentVolumes"
   assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume_role.json
 
   tags = var.tags
@@ -189,7 +189,7 @@ data "aws_iam_policy_document" "lb_controller_assume_role" {
 
 resource "aws_iam_role" "lb_controller" {
   name               = "${var.cluster_name}-lb-controller-irsa"
-  description        = "IRSA role for the AWS Load Balancer Controller — provisions ALBs from Ingress resources"
+  description        = "IRSA role for the AWS Load Balancer Controller - provisions ALBs from Ingress resources"
   assume_role_policy = data.aws_iam_policy_document.lb_controller_assume_role.json
 
   tags = var.tags
