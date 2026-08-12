@@ -306,7 +306,7 @@ spec:
     kind: Deployment
     name: auth-service
 
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 6
 
   metrics:
