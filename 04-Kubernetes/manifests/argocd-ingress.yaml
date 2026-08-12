@@ -12,7 +12,7 @@ metadata:
     alb.ingress.kubernetes.io/ssl-redirect: "443"
     alb.ingress.kubernetes.io/group.name: ivolve-dev-alb
     alb.ingress.kubernetes.io/backend-protocol: HTTPS
-    # ArgoCD server uses HTTPS by default, so we must tell ALB to speak HTTPS to the pod
+    # ArgoCD server uses HTTPS, so the ALB must connect to it via HTTPS
 spec:
   ingressClassName: alb
   rules:

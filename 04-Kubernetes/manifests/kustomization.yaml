@@ -49,7 +49,6 @@ resources:
   - 06-roadmap-service.yaml  # Deployment, Service, HPA, PDB
   - 07-frontend.yaml         # Deployment, Service, NodePort, HPA, PDB
   - 08-ingress.yaml          # ALB Ingress
-  - argocd-ingress.yaml      # ArgoCD Ingress
   - 09-network-policies.yaml # Pod-level firewall rules
 
 # ------------------------------------------------------------------------------
