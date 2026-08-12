@@ -20,6 +20,13 @@
 *Want to actually run this? That file lists every action you take, in order, with the exact command.*
 *This README explains **what** was built and **why**.*
 
+<br/>
+
+### 🎓 **[Build it yourself instead — CloudDevOpsProject-Manual](https://github.com/Waleeddarwesh/CloudDevOpsProject-Manual)**
+
+*This repository is the finished article. The Manual is the same platform with the files removed:*
+*eight guided modules where you write every line, and this repo is the answer key you check against.*
+
 </div>
 
 ---
@@ -263,8 +270,7 @@ CloudDevOpsProject/
 ├── docs/                             # Deep-dive documentation
 │   ├── ARCHITECTURE.md  SETUP.md  CICD.md  SECURITY.md
 │   ├── MONITORING.md  RUNBOOK.md  TROUBLESHOOTING.md
-│   ├── TECHNOLOGY-ROADMAP.md         #   performance · HA · security roadmap
-│   └── adr/                          #   Architecture Decision Records
+│   └── TECHNOLOGY-ROADMAP.md         #   performance · HA · security roadmap
 │
 ├── scripts/
 │   └── sync-shared-library.sh        # mirrors vars/ to the Jenkins library repo
@@ -428,7 +434,7 @@ Beyond the brief, these are the changes that separate a lab exercise from a syst
 
 Each phase directory also carries its own README with line-by-line code explanations.
 
-**Repository conventions:** [CONTRIBUTING.md](CONTRIBUTING.md) (branching, commit format, definition of done) · [SECURITY.md](SECURITY.md) (disclosure policy) · [docs/adr/](docs/adr/) (Architecture Decision Records)
+**Repository conventions:** [CONTRIBUTING.md](CONTRIBUTING.md) (branching, commit format, definition of done) · [SECURITY.md](SECURITY.md) (disclosure policy)
 
 ---
 

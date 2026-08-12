@@ -229,6 +229,14 @@ lint: ## Run every available linter
 
 validate-all: lint ## Alias for `lint`
 
+# ------------------------------------------------------------------------------
+# Documentation
+# ------------------------------------------------------------------------------
+diagrams: ## Regenerate the architecture diagrams (needs: pip install diagrams + graphviz)
+	@echo "$(BLUE)── Rendering architecture diagrams ──$(RESET)"
+	@python scripts/generate_diagrams.py
+	@echo "$(GREEN)Diagrams written to docs/diagrams/$(RESET)"
+
 clean: ## Remove generated and cached files
 	find . -name '*.retry' -delete
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +

@@ -2,6 +2,8 @@
 
 Component design, data flow, network topology, and the reasoning behind each significant decision — including the ones that were trade-offs rather than obvious wins.
 
+> 📐 **Rendered diagrams:** [docs/diagrams/](diagrams/) — four views generated from [`scripts/generate_diagrams.py`](../scripts/generate_diagrams.py) with official AWS/Kubernetes icons. Every edge is verified against `kubectl kustomize` output. The ASCII diagrams below remain the canonical reference (they diff cleanly and render anywhere); the PNGs are the presentation layer.
+
 ---
 
 ## 📑 Contents
