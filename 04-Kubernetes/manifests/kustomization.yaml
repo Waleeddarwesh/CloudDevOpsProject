@@ -51,6 +51,7 @@ resources:
   - 08-ingress.yaml          # ALB Ingress
   - 09-jenkins.yaml          # Jenkins Proxy and Ingress
   - 10-network-policies.yaml # Pod-level firewall rules
+  - 11-argocd-ingress.yaml   # ArgoCD Ingress
 
 # ------------------------------------------------------------------------------
 # Namespace
