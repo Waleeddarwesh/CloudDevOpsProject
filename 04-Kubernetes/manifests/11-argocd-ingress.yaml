@@ -13,7 +13,7 @@ metadata:
     alb.ingress.kubernetes.io/group.name: ivolve-dev-alb
     alb.ingress.kubernetes.io/backend-protocol: HTTPS
     alb.ingress.kubernetes.io/conditions.argocd-server: >-
-      [{"field":"http-header","httpHeaderConfig":{"httpHeaderName":"CF-Connecting-IP","values":["217.54.65.216"]}}]
+      [{"field":"http-header","httpHeaderConfig":{"httpHeaderName":"CF-Connecting-IP","values":["217.52.181.24"]}}]
     # ArgoCD server uses HTTPS, so the ALB must connect to it via HTTPS
 spec:
   ingressClassName: alb
