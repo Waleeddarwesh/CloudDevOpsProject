@@ -76,12 +76,10 @@ def call(Map config) {
         }
     } else {
         // ----------------------------------------------------------------------
-        // Node and Python use the standalone scanner
+        // Node and Python use the standalone scanner via Docker
         // ----------------------------------------------------------------------
-        // `tool` resolves the installation Jenkins manages, so the scanner
-        // version is controlled centrally rather than by whatever happens to be
-        // on the agent's PATH.
-        def scannerHome = tool SONARQUBE_SCANNER
+        // Using the official docker image removes the need to manually configure
+        // the "SonarQube Scanner" tool in Jenkins Global Tool Configuration.
 
         // withSonarQubeEnv injects SONAR_HOST_URL and SONAR_AUTH_TOKEN from the
         // Jenkins configuration, and — importantly — records the analysis task
@@ -91,15 +89,21 @@ def call(Map config) {
         withSonarQubeEnv(SONARQUBE_SERVER) {
             sh """
                 set -eu
-                ${scannerHome}/bin/sonar-scanner \\
-                    -Dsonar.projectKey=${projectKey} \\
-                    -Dsonar.projectName=${projectKey} \\
-                    -Dsonar.projectVersion=${version} \\
-                    -Dsonar.sources=${sourceDir} \\
-                    -Dsonar.sourceEncoding=UTF-8 \\
-                    ${language == 'python' ? "-Dsonar.python.version=3.12" : ""} \\
-                    ${language == 'node'   ? "-Dsonar.javascript.node.maxspace=2048" : ""} \\
-                    -Dsonar.exclusions='**/node_modules/**,**/venv/**,**/__pycache__/**,**/target/**,**/*.min.js'
+                docker run --rm \\
+                    -v "\$(pwd)/${sourceDir}":/usr/src \\
+                    --network host \\
+                    -e SONAR_HOST_URL="\${SONAR_HOST_URL}" \\
+                    -e SONAR_TOKEN="\${SONAR_AUTH_TOKEN}" \\
+                    sonarsource/sonar-scanner-cli:5 \\
+                    sonar-scanner \\
+                        -Dsonar.projectKey=${projectKey} \\
+                        -Dsonar.projectName=${projectKey} \\
+                        -Dsonar.projectVersion=${version} \\
+                        -Dsonar.sources=. \\
+                        -Dsonar.sourceEncoding=UTF-8 \\
+                        ${language == 'python' ? "-Dsonar.python.version=3.12" : ""} \\
+                        ${language == 'node'   ? "-Dsonar.javascript.node.maxspace=2048" : ""} \\
+                        -Dsonar.exclusions='**/node_modules/**,**/venv/**,**/__pycache__/**,**/target/**,**/*.min.js'
             """
         }
     }
