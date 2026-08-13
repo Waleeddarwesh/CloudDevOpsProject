@@ -101,3 +101,11 @@
 - name: Report the kubectl version
   ansible.builtin.debug:
     msg: "{{ kubectl_version_out.stdout_lines[0] | default('kubectl installed') }}"
+
+- name: Install Kustomize
+  # The Jenkins pipeline uses Kustomize to inject the new image tag into the Kubernetes manifests.
+  ansible.builtin.shell:
+    cmd: |
+      curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+      mv kustomize /usr/local/bin/
+    creates: /usr/local/bin/kustomize
