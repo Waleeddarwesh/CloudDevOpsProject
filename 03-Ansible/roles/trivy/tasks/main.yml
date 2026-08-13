@@ -94,6 +94,16 @@
   failed_when: false
   register: trivy_db
 
+- name: Fix Trivy cache directory ownership
+  # The download task runs as root and writes root-owned files inside the cache.
+  # This fixes the ownership so the jenkins user can update the DB later.
+  ansible.builtin.file:
+    path: "{{ trivy_cache_dir }}"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    recurse: true
+
 - name: Schedule a nightly vulnerability database refresh
   # New CVEs are published daily. A stale database silently passes images that
   # would fail today, which is worse than no scan at all because it looks green.
