@@ -40,19 +40,19 @@ metadata:
 # prefixes document intent, and the ArgoCD sync waves in each manifest enforce
 # it at deploy time.
 resources:
-  - 00-namespace.yaml        # Namespace, ResourceQuota, LimitRange
-  - 01-rbac.yaml             # ServiceAccounts, Roles, RoleBindings
-  - 02-config.yaml           # ConfigMap, Secret
-  - 03-storage.yaml          # StorageClass (cluster-scoped)
-  - 04-database.yaml         # Headless Service, MySQL StatefulSet, my.cnf
-  - 05-auth-service.yaml     # Deployment, Service, HPA, PDB
-  - 06-roadmap-service.yaml  # Deployment, Service, HPA, PDB
-  - 07-frontend.yaml         # Deployment, Service, NodePort, HPA, PDB
-  - 08-ingress.yaml          # ALB Ingress
-  - 09-jenkins.yaml          # Jenkins Proxy and Ingress
-  - 10-sonarqube.yaml        # SonarQube Proxy and Ingress
-  - 11-argocd-ingress.yaml   # ArgoCD Ingress
-  - 12-network-policies.yaml # Pod-level firewall rules
+- 00-namespace.yaml
+- 01-rbac.yaml
+- 02-config.yaml
+- 03-storage.yaml
+- 04-database.yaml
+- 05-auth-service.yaml
+- 06-roadmap-service.yaml
+- 07-frontend.yaml
+- 08-ingress.yaml
+- 09-jenkins.yaml
+- 10-sonarqube.yaml
+- 11-argocd-ingress.yaml
+- 12-network-policies.yaml
 
 # ------------------------------------------------------------------------------
 # Namespace
@@ -70,18 +70,18 @@ namespace: ivolve
 # Replace 123456789012 with your account ID, or let the pipeline do it:
 #     terraform -chdir=02-Terraform output -raw ecr_registry
 # ------------------------------------------------------------------------------
+
+
 images:
-  - name: ivolve-frontend
-    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-frontend
-    newTag: latest
-
-  - name: ivolve-auth-service
-    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-auth-service
-    newTag: latest
-
-  - name: ivolve-roadmap-service
-    newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-roadmap-service
-    newTag: latest
+- name: ivolve-auth-service
+  newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-auth-service
+  newTag: latest
+- name: ivolve-frontend
+  newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-frontend
+  newTag: latest
+- name: ivolve-roadmap-service
+  newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-roadmap-service
+  newTag: 9-1f04597
 
 # ------------------------------------------------------------------------------
 # Common labels
@@ -94,14 +94,13 @@ images:
 # "field is immutable" and the only fix is to delete and recreate the
 # Deployment — an outage caused purely by adding a label.
 labels:
-  - includeSelectors: false
-    pairs:
-      app.kubernetes.io/managed-by: kustomize
-      app.kubernetes.io/version: "1.0.0"
+- pairs:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/version: 1.0.0
 
 # ------------------------------------------------------------------------------
 # Common annotations
 # ------------------------------------------------------------------------------
 commonAnnotations:
-  ivolve.io/repository: "https://github.com/WaleedDarwesh/CloudDevOpsProject"
-  ivolve.io/managed-by: "ArgoCD"
+  ivolve.io/managed-by: ArgoCD
+  ivolve.io/repository: https://github.com/WaleedDarwesh/CloudDevOpsProject
