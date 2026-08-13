@@ -122,7 +122,7 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-path: "/login"
     alb.ingress.kubernetes.io/success-codes: "200-403"
     alb.ingress.kubernetes.io/conditions.jenkins-external: >-
-      [{"field":"http-header","httpHeaderConfig":{"httpHeaderName":"CF-Connecting-IP","values":["217.52.181.24"]}}]
+      [{"field":"http-header","httpHeaderConfig":{"httpHeaderName":"CF-Connecting-IP","values":["217.52.181.24", "3.91.114.72"]}}]
 spec:
   ingressClassName: alb
   rules:
