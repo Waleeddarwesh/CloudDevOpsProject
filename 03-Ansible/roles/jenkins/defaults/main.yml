@@ -26,7 +26,7 @@ jenkins_java_opts:
   # Skips the "Jenkins is not ready" splash screen and the initial setup wizard
   # nag. The security wizard itself is NOT disabled — the unlock step still
   # applies.
-  - "-Djenkins.install.runSetupWizard=true"
+  - "-Djenkins.install.runSetupWizard=false"
   # UTF-8 everywhere, so build logs containing non-ASCII output render
   # correctly instead of as mojibake.
   - "-Dfile.encoding=UTF-8"
@@ -48,4 +48,4 @@ jenkins_plugins: []
 
 # --- Jenkins Admin Credentials ---
 jenkins_admin_user: "admin"
-jenkins_admin_password: "admin"
+jenkins_admin_password: "ivolve_admin_2026!"
