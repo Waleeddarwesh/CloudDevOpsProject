@@ -74,8 +74,8 @@ namespace: ivolve
 
 images:
 - name: ivolve-auth-service
-  newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-auth-service
-  newTag: latest
+  newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-auth-service
+  newTag: 14-3cf377d
 - name: ivolve-frontend
   newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-frontend
   newTag: latest
