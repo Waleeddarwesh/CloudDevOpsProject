@@ -68,7 +68,7 @@ def call(Map config) {
                     -e SONAR_HOST_URL="\${SONAR_HOST_URL}" \\
                     -e SONAR_TOKEN="\${SONAR_AUTH_TOKEN}" \\
                     maven:3.9.11-eclipse-temurin-21 \\
-                    mvn -B verify sonar:sonar \\
+                    mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \\
                         -Dsonar.projectKey=${projectKey} \\
                         -Dsonar.projectName=${projectKey} \\
                         -Dsonar.projectVersion=${version}

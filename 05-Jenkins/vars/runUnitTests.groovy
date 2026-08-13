@@ -86,7 +86,7 @@ def call(Map config) {
         // ----------------------------------------------------------------------
         case 'python':
             int hasTests = sh(
-                script: "ls ${sourceDir}/test_*.py ${sourceDir}/tests/ 2>/dev/null | head -1",
+                script: "ls ${sourceDir}/test_*.py >/dev/null 2>&1 || ls -d ${sourceDir}/tests >/dev/null 2>&1",
                 returnStatus: true
             )
 
