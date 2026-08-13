@@ -10,7 +10,7 @@ jobs:
   update-ip:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Update IP in Manifests
         env:
