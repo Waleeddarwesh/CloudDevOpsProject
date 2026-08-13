@@ -16,9 +16,9 @@
 locals {
   # Automatically parse the IP address straight from the .env file in the project root!
   # This guarantees no IP is ever hardcoded in the Terraform files.
-  env_file    = try(file("${path.module}/../.env"), "")
-  ip_matches  = regexall("USER_PUBLIC_IP=([^\\r\\n]+)", local.env_file)
-  dynamic_ip  = length(local.ip_matches) > 0 ? trimspace(local.ip_matches[0][0]) : "0.0.0.0"
+  env_file      = try(file("${path.module}/../.env"), "")
+  ip_matches    = regexall("USER_PUBLIC_IP=([^\\r\\n]+)", local.env_file)
+  dynamic_ip    = length(local.ip_matches) > 0 ? trimspace(local.ip_matches[0][0]) : "0.0.0.0"
   dynamic_cidrs = ["${local.dynamic_ip}/32"]
 }
 
