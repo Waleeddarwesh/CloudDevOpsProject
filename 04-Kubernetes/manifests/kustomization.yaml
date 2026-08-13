@@ -77,8 +77,8 @@ images:
   newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-auth-service
   newTag: 14-3cf377d
 - name: ivolve-frontend
-  newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-prod-frontend
-  newTag: latest
+  newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-frontend
+  newTag: 9-c1713b9
 - name: ivolve-roadmap-service
   newName: 991216470475.dkr.ecr.us-east-1.amazonaws.com/ivolve-roadmap-service
   newTag: 9-1f04597
