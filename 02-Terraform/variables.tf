@@ -132,37 +132,6 @@ variable "key_name" {
   default     = "ivolve-key"
 }
 
-variable "allowed_ssh_cidrs" {
-  description = <<-EOT
-    CIDR blocks permitted to reach port 22 on the Jenkins server.
-
-    SECURITY: leave this as the placeholder and Terraform will refuse to apply.
-    Set it to YOUR_PUBLIC_IP/32 — an SSH port open to 0.0.0.0/0 is found by
-    automated scanners within minutes and is the single most common way a lab
-    AWS account gets compromised and used for crypto mining.
-
-    Find your IP with: curl -s https://checkip.amazonaws.com
-  EOT
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition     = !contains(var.allowed_ssh_cidrs, "0.0.0.0/0")
-    error_message = "Refusing to open SSH (port 22) to the entire internet. Set allowed_ssh_cidrs to your own IP, e.g. [\"203.0.113.9/32\"]."
-  }
-}
-
-variable "allowed_jenkins_ui_cidrs" {
-  description = "CIDR blocks permitted to reach the Jenkins web UI on port 8080. Restrict to your own IP; the setup wizard is unauthenticated until you complete it."
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition     = !contains(var.allowed_jenkins_ui_cidrs, "0.0.0.0/0")
-    error_message = "Refusing to expose the Jenkins UI to the entire internet. Set allowed_jenkins_ui_cidrs to your own IP."
-  }
-}
-
 variable "enable_sonarqube" {
   description = "Open port 9000 on the Jenkins server for the SonarQube container installed by the Ansible role."
   type        = bool
@@ -212,12 +181,6 @@ variable "node_disk_size" {
   description = "EBS volume size in GiB per worker node, holding the container image cache and ephemeral pod storage."
   type        = number
   default     = 30
-}
-
-variable "cluster_endpoint_public_access_cidrs" {
-  description = "CIDRs allowed to reach the public EKS API endpoint. Narrow this to your IP and the Jenkins EIP in a real deployment; 0.0.0.0/0 still requires valid IAM credentials but leaves the endpoint enumerable."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
 }
 
 variable "cluster_log_types" {

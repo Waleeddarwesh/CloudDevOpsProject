@@ -13,6 +13,15 @@
 #     ecr       (independent — no VPC dependency, created in parallel)
 # ==============================================================================
 
+locals {
+  # Automatically parse the IP address straight from the .env file in the project root!
+  # This guarantees no IP is ever hardcoded in the Terraform files.
+  env_file    = try(file("${path.module}/../.env"), "")
+  ip_matches  = regexall("USER_PUBLIC_IP=([^\\r\\n]+)", local.env_file)
+  dynamic_ip  = length(local.ip_matches) > 0 ? trimspace(local.ip_matches[0][0]) : "0.0.0.0"
+  dynamic_cidrs = ["${local.dynamic_ip}/32"]
+}
+
 # ------------------------------------------------------------------------------
 # 1. Network — VPC, subnets, IGW, NAT, route tables, NACLs, flow logs
 # ------------------------------------------------------------------------------
@@ -56,8 +65,8 @@ module "server" {
   root_volume_size = var.jenkins_root_volume_size
   key_name         = var.key_name
 
-  allowed_ssh_cidrs        = var.allowed_ssh_cidrs
-  allowed_jenkins_ui_cidrs = var.allowed_jenkins_ui_cidrs
+  allowed_ssh_cidrs        = local.dynamic_cidrs
+  allowed_jenkins_ui_cidrs = local.dynamic_cidrs
   enable_sonarqube         = var.enable_sonarqube
 
   # Granted to the instance profile so Jenkins can `docker push` to ECR and run
@@ -100,7 +109,7 @@ module "eks" {
   node_max_size       = var.node_max_size
   node_disk_size      = var.node_disk_size
 
-  endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
+  endpoint_public_access_cidrs = local.dynamic_cidrs
   cluster_log_types            = var.cluster_log_types
 
   # Extra IAM principals granted cluster-admin via EKS Access Entries.
