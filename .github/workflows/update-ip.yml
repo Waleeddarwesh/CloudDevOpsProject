@@ -1,0 +1,43 @@
+name: Auto-Update Public IP for Ingress
+
+on:
+  push:
+    paths:
+      - '.env'
+  workflow_dispatch:
+
+jobs:
+  update-ip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Update IP in Manifests
+        env:
+          VAR_IP: ${{ vars.USER_PUBLIC_IP }}
+        run: |
+          NEW_IP="$VAR_IP"
+
+          if [ -z "$NEW_IP" ]; then
+            echo "Error: No IP provided in USER_PUBLIC_IP repo variable."
+            exit 1
+          fi
+
+          echo "Updating Kubernetes manifests to allow IP: $NEW_IP"
+
+          # Replace the IP in the Jenkins Ingress
+          sed -i -E "s/\"values\":\[\"[^\"]+\"\]/\"values\":\[\"$NEW_IP\"\]/" 04-Kubernetes/manifests/09-jenkins.yaml
+
+          # Replace the IP in the ArgoCD Ingress
+          sed -i -E "s/\"values\":\[\"[^\"]+\"\]/\"values\":\[\"$NEW_IP\"\]/" 04-Kubernetes/manifests/11-argocd-ingress.yaml
+
+          # If there are changes, commit them
+          if ! git diff --exit-code; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add 04-Kubernetes/manifests/09-jenkins.yaml 04-Kubernetes/manifests/11-argocd-ingress.yaml
+            git commit -m "chore: auto-update ALB ingress conditions to allow new IP"
+            git push
+          else
+            echo "No changes needed. The IP is already up to date in the manifests."
+          fi
