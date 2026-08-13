@@ -70,7 +70,7 @@ services:
       # larger machine; these fit alongside Jenkins on a t3.medium.
       SONAR_WEB_JAVAOPTS: "-Xmx{{ sonarqube_web_heap }} -Xms256m"
       SONAR_CE_JAVAOPTS: "-Xmx{{ sonarqube_ce_heap }} -Xms256m"
-      SONAR_SEARCH_JAVAOPTS: "-Xmx{{ sonarqube_search_heap }} -Xms256m"
+      SONAR_SEARCH_JAVAOPTS: "-Xmx{{ sonarqube_search_heap }} -Xms{{ sonarqube_search_heap }}"
 
     volumes:
       - {{ sonarqube_data_dir }}/data:/opt/sonarqube/data
