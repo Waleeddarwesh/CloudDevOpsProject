@@ -14,30 +14,47 @@ jobs:
 
       - name: Update IP in Manifests
         env:
-          VAR_IP: ${{ vars.USER_PUBLIC_IP }}
+          USER_IP: ${{ vars.USER_PUBLIC_IP }}
+          SHARED_IP: ${{ vars.SHARED_PUBLIC_IP }}
         run: |
-          NEW_IP="$VAR_IP"
+          # Source .env if it exists to allow local overrides
+          if [ -f .env ]; then
+            set -a; source .env; set +a
+          fi
+          
+          # Fallback to the environment variables set by GitHub vars
+          USER_IP="${USER_PUBLIC_IP:-$USER_IP}"
+          SHARED_IP="${SHARED_PUBLIC_IP:-$SHARED_IP}"
 
-          if [ -z "$NEW_IP" ]; then
-            echo "Error: No IP provided in USER_PUBLIC_IP repo variable."
+          if [ -z "$USER_IP" ]; then
+            echo "Error: No IP provided in USER_PUBLIC_IP variable."
             exit 1
           fi
 
-          echo "Updating Kubernetes manifests to allow IP: $NEW_IP"
+          echo "Updating Kubernetes manifests to allow USER_IP: $USER_IP"
+          if [ -n "$SHARED_IP" ]; then
+            echo "Also allowing SHARED_IP (EC2): $SHARED_IP for Jenkins webhook"
+          fi
 
-          # Replace the IP in the Jenkins Ingress
-          sed -i -E "s/\"values\":\[\"[^\"]+\"\]/\"values\":\[\"$NEW_IP\"\]/" 04-Kubernetes/manifests/09-jenkins.yaml
+          # Replace the IP in the Jenkins Ingress (Needs both User IP and Shared EC2 IP for webhooks)
+          if [ -n "$SHARED_IP" ]; then
+            sed -i -E "s/\"values\":\[[^]]*\]/\"values\":\[\"$USER_IP\", \"$SHARED_IP\"\]/" 04-Kubernetes/manifests/09-jenkins.yaml
+          else
+            sed -i -E "s/\"values\":\[[^]]*\]/\"values\":\[\"$USER_IP\"\]/" 04-Kubernetes/manifests/09-jenkins.yaml
+          fi
 
-          # Replace the IP in the ArgoCD Ingress
-          sed -i -E "s/\"values\":\[\"[^\"]+\"\]/\"values\":\[\"$NEW_IP\"\]/" 04-Kubernetes/manifests/11-argocd-ingress.yaml
+          # Replace the IP in other Ingresses (Only needs User IP)
+          sed -i -E "s/\"values\":\[[^]]*\]/\"values\":\[\"$USER_IP\"\]/" 04-Kubernetes/manifests/11-argocd-ingress.yaml
+          sed -i -E "s/\"values\":\[[^]]*\]/\"values\":\[\"$USER_IP\"\]/" 04-Kubernetes/manifests/10-sonarqube.yaml
+          sed -i -E "s/\"values\":\[[^]]*\]/\"values\":\[\"$USER_IP\"\]/" 07-Monitoring/kube-prometheus-stack-values.yaml
 
           # If there are changes, commit them
           if ! git diff --exit-code; then
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git add 04-Kubernetes/manifests/09-jenkins.yaml 04-Kubernetes/manifests/11-argocd-ingress.yaml
-            git commit -m "chore: auto-update ALB ingress conditions to allow new IP"
+            git add 04-Kubernetes/manifests/09-jenkins.yaml 04-Kubernetes/manifests/11-argocd-ingress.yaml 04-Kubernetes/manifests/10-sonarqube.yaml 07-Monitoring/kube-prometheus-stack-values.yaml
+            git commit -m "chore: auto-update ALB ingress conditions for new IPs"
             git push
           else
-            echo "No changes needed. The IP is already up to date in the manifests."
+            echo "No changes needed. The IPs are already up to date in the manifests."
           fi
