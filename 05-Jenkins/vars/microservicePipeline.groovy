@@ -78,8 +78,13 @@ def call(Map config) {
         agent any
 
         // ----------------------------------------------------------------------
-        // Options
+        // Options & Triggers
         // ----------------------------------------------------------------------
+        triggers {
+            // Automatically triggers the pipeline when a GitHub webhook is received
+            githubPush()
+        }
+
         options {
             // Cap retained history. Without this, Jenkins keeps every build
             // forever and JENKINS_HOME grows until the disk fills — the most
