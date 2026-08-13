@@ -49,18 +49,18 @@ Every other document in this repository explains **how things work**. This one i
 
 This project provisions real, billable AWS infrastructure.
 
-| Resource | Rate | Monthly if left running |
-|---|---|---|
-| EKS control plane | $0.10/hr | ~$73 |
-| 2 × t3.medium worker nodes | $0.083/hr | ~$60 |
-| Jenkins t3.medium | $0.042/hr | ~$30 |
-| NAT Gateway | $0.045/hr + data | ~$33 |
+| Resource | Est. Cost / Hr | Est. Cost / Mo |
+| :--- | :--- | :--- |
+| **AWS EKS Control Plane** | $0.100/hr | **~$73** |
+| 2 × NAT Gateways | $0.090/hr | **~$65** |
+| 3 × `m7i-flex.large` worker nodes | $0.000/hr (Free Tier) | **$0** |
+| Jenkins `t3.small` | $0.000/hr (Free Tier) | **$0** |
 | Application Load Balancer | $0.023/hr + LCU | ~$17 |
-| **Total** | **~$0.30/hr** | **~$215** |
+| **Total** | **~$0.21/hr** | **~$155** |
 
 > ⚠️ **A forgotten cluster costs about $7 per day.** Run [`make tf-destroy`](#teardown) the moment you finish. Set an AWS Budget alert at $20 before you start — it takes two minutes and has saved many people a painful bill.
 
-**Free-tier note:** none of the above is free-tier eligible. EKS in particular has no free tier at all.
+**Free-tier note:** While the EC2 instances (`m7i-flex.large` and `t3.small`) are fully Free Tier eligible, the EKS Control Plane ($0.10/hr) and NAT Gateways have no free tier.
 
 ---
 

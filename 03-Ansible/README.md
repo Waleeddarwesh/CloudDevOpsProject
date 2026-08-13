@@ -314,7 +314,7 @@ ansible-inventory --host ivolve-dev-jenkins
     "ansible_user": "ubuntu",
     "ansible_ssh_private_key_file": "~/.ssh/ivolve-key.pem",
     "ec2_instance_id": "i-0abc123def456789",
-    "ec2_instance_type": "t3.medium"
+    "ec2_instance_type": "t3.small"
 }
 ```
 

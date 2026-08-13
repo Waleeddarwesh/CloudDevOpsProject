@@ -69,6 +69,8 @@ Every directory carries a dedicated `README.md` with **line-by-line explanations
 
 ## 🗺️ Architecture Overview
 
+![Architecture Diagram](Screenshots/CloudDevOpsProject_Architecture.png)
+
 ```mermaid
 flowchart TB
     subgraph DEV["💻 Local Development"]
@@ -370,7 +372,7 @@ make mon-install
 make k8s-status
 ```
 
-Full instructions, including the AWS Load Balancer Controller and the Jenkins shared-library setup, are in **[docs/SETUP.md](docs/SETUP.md)**.
+Full instructions, including the AWS Load Balancer Controller and the Jenkins shared-library setup, are in **[START-HERE.md](START-HERE.md)**.
 
 ---
 
@@ -425,7 +427,7 @@ Beyond the brief, these are the changes that separate a lab exercise from a syst
 | Document | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component design, data flow, network topology, design decisions and trade-offs, known limitations |
-| [docs/SETUP.md](docs/SETUP.md) | Complete zero-to-running walkthrough with expected output at each step |
+| [START-HERE.md](START-HERE.md) | Complete zero-to-running walkthrough with expected output at each step |
 | [docs/CICD.md](docs/CICD.md) | Pipeline internals, shared-library API, Jenkins configuration, RBAC and agents |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, secrets strategy, IAM/RBAC layers, hardening checklist |
 | [docs/MONITORING.md](docs/MONITORING.md) | Metrics architecture, alert catalogue, dashboards, white-box upgrade path |
@@ -448,8 +450,8 @@ Approximate `us-east-1` on-demand pricing for a continuously-running environment
 | Resource | Configuration | ~Monthly |
 |---|---|---:|
 | EKS control plane | 1 cluster | $73 |
-| EKS worker nodes | 2 × t3.medium | $61 |
-| Jenkins server | 1 × t3.medium + 50 GB gp3 | $34 |
+| EKS worker nodes | 3 × m7i-flex.large | $0 (Free Tier) |
+| Jenkins server | 1 × t3.small + 50 GB gp3 | ~$4 (EBS overage) |
 | NAT Gateway | 1 shared (`single_nat_gateway = true`) | $33 |
 | Application Load Balancer | 1 ALB | $17 |
 | EBS volumes | MySQL 10 GB + Prometheus 20 GB + nodes | $8 |
@@ -501,6 +503,11 @@ cd 02-Terraform/bootstrap && terraform destroy
 ---
 
 <div align="center">
+
+### 🏆 **[View Project Success Report & Screenshots](PROJECT_SUCCESS.md)** 🏆
+*A massive gallery proving the successful deployment of the architecture, pipelines, GitOps, and monitoring.*
+
+<br/>
 
 _Built as the capstone of the iVolve Technologies Cloud DevOps internship._
 

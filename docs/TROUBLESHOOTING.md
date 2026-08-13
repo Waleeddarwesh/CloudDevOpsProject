@@ -228,7 +228,7 @@ ssh ubuntu@<IP> 'sudo docker compose -f /opt/sonarqube/docker-compose.yml logs s
 |---|---|
 | `max virtual memory areas vm.max_map_count [65530] is too low` | `sudo sysctl -w vm.max_map_count=262144` — the `common` role sets this |
 | `max file descriptors ... too low` | The `ulimits` block in the Compose template |
-| Out of memory | t3.medium is tight with Jenkins + SonarQube. Use t3.large, or `--skip-tags sonarqube` |
+| Out of memory | t3.small is tight with Jenkins + SonarQube. Use t3.large, or `--skip-tags sonarqube` |
 
 ---
 
@@ -562,4 +562,4 @@ make lint
 
 ---
 
-**See also:** [RUNBOOK](RUNBOOK.md) (runtime incidents) · [SETUP](SETUP.md) (installation) · [ARCHITECTURE](ARCHITECTURE.md#known-limitations) (known limitations)
+**See also:** [RUNBOOK](RUNBOOK.md) (runtime incidents) · [START-HERE](../START-HERE.md) (installation) · [ARCHITECTURE](ARCHITECTURE.md#known-limitations) (known limitations)

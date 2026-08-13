@@ -24,6 +24,8 @@ Component design, data flow, network topology, and the reasoning behind each sig
 
 ## 🗺️ System Overview
 
+![Architecture Diagram](../Screenshots/CloudDevOpsProject_Architecture.png)
+
 ```text
 ┌───────────────────────────────────────────────────────────────────────────┐
 │ AWS Account · us-east-1                                                   │
@@ -35,7 +37,7 @@ Component design, data flow, network topology, and the reasoning behind each sig
 │  │  │  us-east-1a  10.0.1.0/24      us-east-1b  10.0.2.0/24          │ │  │
 │  │  │  ┌────────────────────┐       ┌──────────────────────────┐     │ │  │
 │  │  │  │ Jenkins EC2        │       │  (ALB spans both AZs)    │     │ │  │
-│  │  │  │ t3.medium · EIP    │       └──────────────────────────┘     │ │  │
+│  │  │  │ t3.small · EIP     │       └──────────────────────────┘     │ │  │
 │  │  │  │ IMDSv2 · IAM role  │                                        │ │  │
 │  │  │  └────────────────────┘       ┌──────────────────────────┐     │ │  │
 │  │  │  ┌────────────────────┐       │  Application Load        │     │ │  │
@@ -409,4 +411,4 @@ Ordered by value:
 
 ---
 
-**See also:** [SETUP](SETUP.md) · [CICD](CICD.md) · [SECURITY](SECURITY.md) · [MONITORING](MONITORING.md) · [RUNBOOK](RUNBOOK.md) · [TROUBLESHOOTING](TROUBLESHOOTING.md)
+**See also:** [START-HERE](../START-HERE.md) · [CICD](CICD.md) · [SECURITY](SECURITY.md) · [MONITORING](MONITORING.md) · [RUNBOOK](RUNBOOK.md) · [TROUBLESHOOTING](TROUBLESHOOTING.md)

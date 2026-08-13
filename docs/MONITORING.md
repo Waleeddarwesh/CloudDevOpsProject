@@ -64,10 +64,10 @@ For installation see [Phase 7](../07-Monitoring/README.md). For responding to a 
 ```text
    DaemonSet                          Deployment replicas: 2
 ┌──────────────────────────────┐   ┌────────────────────────────────┐
-│ node-1 ──► exporter          │   │ node-1 ──► exporter × 2         │
-│ node-2 ──► exporter          │   │ node-2 ──► (none)               │
-│ node-3 ──► exporter  ← added │   │                                 │
-│            automatically     │   │ ✗ node-2 unmonitored, silently  │
+│ node-1 ──► exporter          │   │ node-1 ──► exporter × 2        │
+│ node-2 ──► exporter          │   │ node-2 ──► (none)              │
+│ node-3 ──► exporter  ← added │   │                                │
+│            automatically     │   │ ✗ node-2 unmonitored, silently │
 └──────────────────────────────┘   └────────────────────────────────┘
 ```
 
@@ -105,11 +105,11 @@ A `ServiceMonitor` would therefore have nothing to scrape.
 ┌──────────────────────────────┐   ┌────────────────────────────────────┐
 │ requires modifying src/      │   │ zero application changes           │
 │                              │   │                                    │
-│ ✓ request rate by route      │   │ ✓ availability                     │
-│ ✓ error rate by status code  │   │ ✓ end-to-end latency               │
-│ ✓ latency histograms (p50/99)│   │ ✓ status code correctness          │
-│ ✓ GC, thread pools, JDBC     │   │ ✗ no internal detail               │
-│ ✓ business counters          │   │ ✗ no per-route breakdown           │
+│ ✓ request rate by route      │   │ ✓ availability                    │
+│ ✓ error rate by status code  │   │ ✓ end-to-end latency              │
+│ ✓ latency histograms (p50/99)│   │ ✓ status code correctness         │
+│ ✓ GC, thread pools, JDBC     │   │ ✗ no internal detail              │
+│ ✓ business counters          │   │ ✗ no per-route breakdown          │
 └──────────────────────────────┘   └────────────────────────────────────┘
 ```
 

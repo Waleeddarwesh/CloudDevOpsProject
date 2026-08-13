@@ -39,7 +39,7 @@ For setup instructions see [Phase 5](../05-Jenkins/README.md). This document cov
 │ 2 Unit Tests      containerised, per language         │
 │ 3 SonarQube       + quality gate                      │
 │ 4 Build Image     multi-stage, OCI provenance labels  │
-│ 5 Scan Image      Trivy  ⛔ CRITICAL+fixable = FAIL    │
+│ 5 Scan Image      Trivy  ⛔ CRITICAL+fixable = FAIL   │
 │ 6 Push Image      → ECR (instance profile)            │
 │ 7 Delete Local    reclaim disk                        │
 │ 8 Update Manifest kustomize edit set image            │

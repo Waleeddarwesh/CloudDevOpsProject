@@ -139,7 +139,7 @@ def get_connection():
 
 ### 5 · Graviton (ARM64) instances
 
-| | x86 (t3.medium) | Graviton (t4g.medium) |
+| | x86 (m7i-flex.large) | Graviton (t4g.medium) |
 |---|---:|---:|
 | Cost/mo | $30.37 | **$24.23** (-20%) |
 | Performance | baseline | +10-20% on these workloads |

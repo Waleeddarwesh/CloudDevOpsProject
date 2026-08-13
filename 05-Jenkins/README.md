@@ -25,7 +25,7 @@ Without a shared library, every service copies the same pipeline. Three copies d
 │ fix a bug → edit 3 files     │   │ vars/trivyScan.groovy              │
 │ 540 lines to review          │   │ vars/ecrPush.groovy                │
 └──────────────────────────────┘   │ vars/updateManifests.groovy        │
-└──────────────────────────────┘   │ vars/pushManifests.groovy          │
+                                   │ vars/pushManifests.groovy          │
                                    │ vars/runUnitTests.groovy           │
                                    │ vars/sonarQubeScan.groovy          │
                                    │                                    │
