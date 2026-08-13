@@ -21,7 +21,7 @@ jobs:
           if [ -f .env ]; then
             set -a; source .env; set +a
           fi
-          
+
           # Fallback to the environment variables set by GitHub vars
           USER_IP="${USER_PUBLIC_IP:-$USER_IP}"
           SHARED_IP="${SHARED_PUBLIC_IP:-$SHARED_IP}"
