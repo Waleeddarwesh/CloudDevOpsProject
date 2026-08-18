@@ -22,9 +22,9 @@
 
 <br/>
 
-### 🎓 **[Build it yourself instead — CloudDevOpsProject-Manual](https://github.com/Waleeddarwesh/CloudDevOpsProject-Manual)**
+### 🎓 **[Build it yourself instead — CloudDevOpsProject-Guided](https://github.com/Waleeddarwesh/CloudDevOpsProject-Guided)**
 
-*This repository is the finished article. The Manual is the same platform with the files removed:*
+*This repository is the finished article. The Guided version is the same platform with the files removed:*
 *eight guided modules where you write every line, and this repo is the answer key you check against.*
 
 </div>

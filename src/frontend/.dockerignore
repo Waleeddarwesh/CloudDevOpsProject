@@ -1,0 +1,21 @@
+# ==============================================================================
+# .dockerignore — frontend (Node.js)
+# ==============================================================================
+# Keeps the build context small and prevents secrets or development artefacts
+# from being copied into the image.
+# ==============================================================================
+
+node_modules/
+npm-debug.log*
+.env
+.env.*
+*.pem
+*.key
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+*.md
+.vscode/
+.idea/
+.DS_Store

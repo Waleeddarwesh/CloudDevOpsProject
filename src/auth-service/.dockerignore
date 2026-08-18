@@ -1,0 +1,16 @@
+# ==============================================================================
+# .dockerignore — auth-service (Python)
+# ==============================================================================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.env
+.env.*
+*.pem
+*.key
+.git/
+.dockerignore
+Dockerfile
+*.md
