@@ -1,0 +1,15 @@
+# ==============================================================================
+# .dockerignore — roadmap-service (Java / Maven)
+# ==============================================================================
+target/
+.mvn/
+mvnw
+mvnw.cmd
+.env
+*.pem
+*.key
+.git/
+.dockerignore
+Dockerfile
+*.md
+*.iml
