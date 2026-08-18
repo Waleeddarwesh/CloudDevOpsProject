@@ -8,7 +8,7 @@
 # ==============================================================================
 
 # --- Stage 1: install production dependencies ---
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 
 WORKDIR /app
 COPY package*.json ./
@@ -18,7 +18,7 @@ RUN npm install -g npm@latest \
     && npm install --omit=dev --no-audit --no-fund
 
 # --- Stage 2: production runtime ---
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 
 LABEL org.opencontainers.image.title="ivolve-frontend" \
       org.opencontainers.image.description="iVolve DevOps Roadmap — web frontend"
