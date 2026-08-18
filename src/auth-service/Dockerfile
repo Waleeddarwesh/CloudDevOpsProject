@@ -8,7 +8,7 @@
 # ==============================================================================
 
 # --- Stage 1: build wheels for native extensions ---
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -22,7 +22,7 @@ COPY requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
 # --- Stage 2: production runtime ---
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 LABEL org.opencontainers.image.title="ivolve-auth-service" \
       org.opencontainers.image.description="iVolve DevOps Roadmap — authentication API"
